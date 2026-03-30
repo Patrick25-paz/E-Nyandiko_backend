@@ -1,0 +1,328 @@
+// Prisma schema for E-Nyandiko (Digital Agreement Platform)
+// Dynamic device types/fields are modeled via DeviceType -> DeviceField -> DeviceFieldValue
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  SELLER
+  BUYER
+}
+
+enum DeviceStatus {
+  DRAFT
+  ACTIVE
+  SOLD
+}
+
+enum AgreementStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CARD
+  OTHER
+}
+
+enum FieldDataType {
+  STRING
+  NUMBER
+  BOOLEAN
+  DATE
+  ENUM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+}
+
+enum SubscriptionClaimStatus {
+  CLAIMED
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  // Optional identifiers for walk-in clients created by sellers.
+  // A client can log in using clientCode OR email OR nationalId (plus PIN).
+  clientCode   String?  @unique
+  nationalId   String?  @unique
+  phone        String?  @unique
+  fullName     String
+  passwordHash         String
+  isActive             Boolean  @default(true)
+  emailVerified        Boolean  @default(false)
+  verificationToken    String?  @unique
+  resetPasswordToken   String?  @unique
+  resetPasswordExpires DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  roles  UserRole[]
+  seller Seller?
+  buyer  Buyer?
+
+  reviewedSubscriptionClaims SubscriptionClaim[] @relation("SubscriptionClaimReviewedBy")
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        RoleName @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  users UserRole[]
+}
+
+model UserRole {
+  id         String   @id @default(cuid())
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+}
+
+model Seller {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  businessName String?
+  tinNumber    String?
+  phone        String?
+  whatsapp     String?
+  location     String?
+  floor        String?
+  logoUrl      String?
+  logoPublicId String?
+
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  devices            Device[]
+  agreementsAsSeller Agreement[] @relation("AgreementSeller")
+
+  subscriptions      SellerSubscription[]
+  subscriptionClaims SubscriptionClaim[]
+}
+
+model SubscriptionSettings {
+  // Single-row settings table. Use id = "default".
+  id         String   @id @default("default")
+  monthlyFee Int      @default(2000)
+  currency   String   @default("RWF")
+  paymentNumber String @default("0791689396")
+  whatsappNumber String @default("")
+  receiverNames String @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model SubscriptionClaim {
+  id        String                  @id @default(cuid())
+  sellerId  String
+  status    SubscriptionClaimStatus @default(CLAIMED)
+
+  amount    Int
+  currency  String @default("RWF")
+
+  createdAt DateTime @default(now())
+  reviewedAt DateTime?
+  reviewedByUserId String?
+
+  seller       Seller              @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  reviewedBy   User?               @relation("SubscriptionClaimReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  subscription SellerSubscription? @relation("ClaimSubscription")
+
+  @@index([sellerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SellerSubscription {
+  id        String             @id @default(cuid())
+  sellerId  String
+  status    SubscriptionStatus @default(ACTIVE)
+  startAt   DateTime
+  endAt     DateTime
+  createdAt DateTime @default(now())
+
+  claimId   String? @unique
+
+  seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  claim  SubscriptionClaim? @relation("ClaimSubscription", fields: [claimId], references: [id], onDelete: SetNull)
+
+  @@index([sellerId])
+  @@index([status])
+  @@index([startAt])
+  @@index([endAt])
+}
+
+model Buyer {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agreementsAsBuyer Agreement[] @relation("AgreementBuyer")
+}
+
+model DeviceType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  fields  DeviceField[]
+  devices Device[]
+}
+
+model DeviceField {
+  id           String        @id @default(cuid())
+  deviceTypeId String
+  key          String
+  label        String
+  dataType     FieldDataType
+  required     Boolean       @default(false)
+  // For ENUM fields, store allowed options as a JSON array of strings.
+  options      Json?
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  deviceType DeviceType         @relation(fields: [deviceTypeId], references: [id], onDelete: Cascade)
+  values     DeviceFieldValue[]
+
+  @@unique([deviceTypeId, key])
+  @@index([deviceTypeId])
+}
+
+model Device {
+  id           String       @id @default(cuid())
+  sellerId     String
+  deviceTypeId String
+  title        String?
+  status       DeviceStatus @default(DRAFT)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  seller     Seller     @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  deviceType DeviceType @relation(fields: [deviceTypeId], references: [id], onDelete: Restrict)
+
+  fieldValues DeviceFieldValue[]
+  images      DeviceImage[]
+  agreements  Agreement[]
+
+  @@index([sellerId])
+  @@index([deviceTypeId])
+  @@index([createdAt])
+}
+
+model DeviceFieldValue {
+  id            String   @id @default(cuid())
+  deviceId      String
+  deviceFieldId String
+  // Store values in JSON to support multiple data types dynamically.
+  // Validation/casting is handled in the service layer based on DeviceField.dataType.
+  value         Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  device      Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceField DeviceField @relation(fields: [deviceFieldId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, deviceFieldId])
+  @@index([deviceFieldId])
+}
+
+model DeviceImage {
+  id        String   @id @default(cuid())
+  deviceId  String
+  url       String
+  publicId  String   @unique
+  format    String?
+  bytes     Int?
+  width     Int?
+  height    Int?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+}
+
+model Agreement {
+  id       String @id @default(cuid())
+  deviceId String
+  sellerId String
+  buyerId  String
+
+  price    Decimal
+  currency String  @default("USD")
+  terms    String
+
+  status      AgreementStatus @default(PENDING)
+  isImmutable Boolean         @default(false)
+  acceptedAt  DateTime?
+
+  // Snapshot of the device data at the time of acceptance (or creation).
+  deviceSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  seller Seller @relation("AgreementSeller", fields: [sellerId], references: [id], onDelete: Restrict)
+  buyer  Buyer  @relation("AgreementBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+
+  payments Payment[]
+
+  @@index([deviceId])
+  @@index([sellerId])
+  @@index([buyerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  agreementId String
+  amount      Decimal
+  method      PaymentMethod @default(OTHER)
+  reference   String?
+  paidAt      DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+
+  agreement Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+
+  @@index([agreementId])
+  @@index([paidAt])
+  @@index([createdAt])
+}
