@@ -146,6 +146,13 @@ async function listSellersWithLatestSubscription() {
             phone: true,
             whatsapp: true,
             location: true,
+            province: true,
+            district: true,
+            sector: true,
+            cell: true,
+            village: true,
+            noticeableName: true,
+            houseName: true,
             floor: true,
             user: { select: { fullName: true, email: true, phone: true, emailVerified: true } },
             subscriptions: {

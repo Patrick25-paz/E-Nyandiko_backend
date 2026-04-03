@@ -215,10 +215,6 @@ async function clientLogin({ identifier, pin }) {
     const ok = await verifyPassword(pin, user.passwordHash);
     if (!ok) throw new ApiError(401, 'Invalid credentials');
 
-    if (!user.emailVerified) {
-        throw new ApiError(401, 'Please verify your email before logging in.');
-    }
-
     const roles = user.roles.map((ur) => ur.role.name);
     if (!roles.includes('BUYER')) throw new ApiError(403, 'Client login is only for buyers');
 

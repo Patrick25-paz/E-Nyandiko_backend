@@ -1,0 +1,9 @@
+-- Add structured seller address fields
+ALTER TABLE "Seller"
+ADD COLUMN IF NOT EXISTS "province" TEXT,
+ADD COLUMN IF NOT EXISTS "district" TEXT,
+ADD COLUMN IF NOT EXISTS "sector" TEXT,
+ADD COLUMN IF NOT EXISTS "cell" TEXT,
+ADD COLUMN IF NOT EXISTS "village" TEXT,
+ADD COLUMN IF NOT EXISTS "noticeableName" TEXT,
+ADD COLUMN IF NOT EXISTS "houseName" TEXT;

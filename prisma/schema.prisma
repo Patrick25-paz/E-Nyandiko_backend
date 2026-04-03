@@ -116,8 +116,18 @@ model Seller {
   tinNumber    String?
   phone        String?
   whatsapp     String?
+  // Legacy free-form location (kept for backward compatibility / reporting)
   location     String?
-  floor        String?
+
+  // Structured address fields (recommended)
+  province        String?
+  district        String?
+  sector          String?
+  cell            String?
+  village         String?
+  noticeableName  String?
+  houseName       String?
+  floor           String?
   logoUrl      String?
   logoPublicId String?
 

@@ -6,6 +6,26 @@ const agreementRepository = require('../repositories/agreement.repository');
 const { uploadBuffer } = require('./imageUpload.service');
 
 
+function formatSellerLocationFromParts(data) {
+    const parts = [
+        data.province,
+        data.district,
+        data.sector,
+        data.cell,
+        data.village
+    ].filter(Boolean);
+
+    const extras = [
+        data.noticeableName ? `Near ${data.noticeableName}` : null,
+        data.houseName ? `House: ${data.houseName}` : null,
+        data.floor ? `Floor: ${data.floor}` : null
+    ].filter(Boolean);
+
+    const base = parts.join(', ');
+    const extra = extras.length ? ` (${extras.join(', ')})` : '';
+    return (base || extra) ? `${base}${extra}`.trim() : null;
+}
+
 async function getSellerProfile(userId) {
     const seller = await sellerRepository.findSellerByUserId(userId);
     if (!seller) throw new ApiError(404, 'Seller profile not found');
@@ -22,8 +42,24 @@ async function updateSellerProfile(userId, data) {
         phone: data.phone,
         whatsapp: data.whatsapp,
         location: data.location,
+        province: data.province,
+        district: data.district,
+        sector: data.sector,
+        cell: data.cell,
+        village: data.village,
+        noticeableName: data.noticeableName,
+        houseName: data.houseName,
         floor: data.floor
     };
+
+    // If structured fields are provided (and legacy location isn't), keep `location` in sync for older views.
+    const hasStructured = Boolean(
+        data.province || data.district || data.sector || data.cell || data.village || data.noticeableName || data.houseName || data.floor
+    );
+    if (!data.location && hasStructured) {
+        const formatted = formatSellerLocationFromParts(data);
+        if (formatted) updateData.location = formatted;
+    }
 
     if (data.file) {
         const folder = `${env.CLOUDINARY_FOLDER}/sellers/${seller.id}`;

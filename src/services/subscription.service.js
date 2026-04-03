@@ -107,6 +107,19 @@ async function createMyClaim(user) {
 async function listAdminSellers(user) {
     if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
 
+    const formatSellerLocation = (seller) => {
+        const parts = [seller?.province, seller?.district, seller?.sector, seller?.cell, seller?.village].filter(Boolean);
+        const extras = [
+            seller?.noticeableName ? `Near ${seller.noticeableName}` : null,
+            seller?.houseName ? `House: ${seller.houseName}` : null,
+            seller?.floor ? `Floor: ${seller.floor}` : null
+        ].filter(Boolean);
+        const base = parts.join(', ');
+        const extra = extras.length ? ` (${extras.join(', ')})` : '';
+        const formatted = (base || extra) ? `${base}${extra}`.trim() : null;
+        return formatted || seller?.location || '-';
+    };
+
     const now = new Date();
     const sellers = await subscriptionRepository.listSellersWithLatestSubscription();
 
@@ -124,7 +137,7 @@ async function listAdminSellers(user) {
             fullName: s.user?.fullName || '-',
             email: s.user?.email || '-',
             phone: s.phone || s.user?.phone || '-',
-            location: s.location || '-',
+            location: formatSellerLocation(s),
             status,
             subscription: latest,
             pendingClaim
