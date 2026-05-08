@@ -7,6 +7,7 @@ const pinoHttp = require('pino-http');
 
 const env = require('./config/env');
 const logger = require('./utils/logger');
+const { requestContextMiddleware, getRequestContext } = require('./utils/requestContext');
 const routes = require('./routes');
 const errorMiddleware = require('./middlewares/error.middleware');
 const { configureCloudinary } = require('./config/cloudinary');
@@ -14,6 +15,10 @@ const { configureCloudinary } = require('./config/cloudinary');
 configureCloudinary();
 
 const app = express();
+
+// For JSON APIs, ETag/304 adds CPU + DB cost (the handler still runs to compute the response body).
+// Disable to keep repeated fetches fast and predictable.
+app.set('etag', false);
 
 app.use(
     helmet({
@@ -38,6 +43,38 @@ app.use(
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+app.use(requestContextMiddleware);
+
+// Log a breakdown only when requests are slow (keeps logs readable).
+app.use((req, res, next) => {
+    const ctx = getRequestContext();
+    if (!ctx) return next();
+
+    res.on('finish', () => {
+        const totalMs = Number(process.hrtime.bigint() - ctx.startAtNs) / 1e6;
+        const slowRequestMs = Number(process.env.SLOW_REQUEST_MS || 800);
+        const slowDbMs = Number(process.env.SLOW_DB_MS || 500);
+
+        if (slowRequestMs > 0 && totalMs < slowRequestMs && slowDbMs > 0 && ctx.dbTimeMs < slowDbMs) return;
+
+        logger.warn(
+            {
+                requestId: ctx.requestId,
+                method: req.method,
+                url: req.originalUrl || req.url,
+                statusCode: res.statusCode,
+                totalMs: Math.round(totalMs),
+                authMs: Math.round(ctx.authTimeMs),
+                dbMs: Math.round(ctx.dbTimeMs),
+                dbQueries: ctx.dbQueries
+            },
+            'Slow request breakdown'
+        );
+    });
+
+    return next();
+});
 
 app.use(
     pinoHttp({

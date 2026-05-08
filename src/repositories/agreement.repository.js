@@ -96,7 +96,10 @@ async function setDeviceSold(deviceId) {
 }
 
 async function listAgreementsAsSeller(sellerId, options = {}) {
-    // Performance note: for large datasets, consider a composite index on (sellerId, createdAt) and/or (sellerId, status).
+    // Performance note: composite index on (sellerId, createdAt) improves pagination performance.
+    const limit = Math.min(Number(options.limit) || 20, 100); // Default 20, max 100
+    const skip = Math.max(Number(options.skip) || 0, 0);
+
     return prisma.agreement.findMany({
         where: { sellerId },
         // Optimization: select only fields used by frontend lists (no payments).
@@ -141,14 +144,17 @@ async function listAgreementsAsSeller(sellerId, options = {}) {
             }
         },
         orderBy: { createdAt: 'desc' },
-        take: options.limit ? Number(options.limit) : undefined,
-        skip: options.skip ? Number(options.skip) : undefined
+        take: limit,
+        skip: skip
     });
 }
 
 
 async function listAgreementsAsBuyer(buyerId, options = {}) {
-    // Performance note: for large datasets, consider a composite index on (buyerId, createdAt) and/or (buyerId, status).
+    // Performance note: composite index on (buyerId, createdAt) improves pagination performance.
+    const limit = Math.min(Number(options.limit) || 20, 100); // Default 20, max 100
+    const skip = Math.max(Number(options.skip) || 0, 0);
+
     return prisma.agreement.findMany({
         where: { buyerId },
         // Optimization: select only fields used by frontend lists (no payments).
@@ -193,8 +199,8 @@ async function listAgreementsAsBuyer(buyerId, options = {}) {
             }
         },
         orderBy: { createdAt: 'desc' },
-        take: options.limit ? Number(options.limit) : undefined,
-        skip: options.skip ? Number(options.skip) : undefined
+        take: limit,
+        skip: skip
     });
 }
 

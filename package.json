@@ -7,14 +7,16 @@
         "node": ">=18 <23"
     },
     "scripts": {
-        "dev": "nodemon src/server.js",
+        "dev": "nodemon --signal SIGTERM --delay 1000ms src/server.js",
         "start": "node src/server.js",
         "prisma:generate": "prisma generate",
         "prisma:migrate": "prisma migrate dev",
         "prisma:migrate:deploy": "prisma migrate deploy",
         "render:build": "npm run prisma:generate && npm run prisma:migrate:deploy",
         "prisma:studio": "prisma studio",
-        "seed": "node prisma/seed.js"
+        "seed": "node prisma/seed.js",
+        "user:type": "node scripts/update-user-type.js",
+        "patch:seller-shop": "node scripts/update-user-type.js seller@enyandiko.com SHOP"
     },
     "dependencies": {
         "@prisma/client": "^6.0.0",

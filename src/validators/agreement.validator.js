@@ -11,6 +11,7 @@ function preprocessBoolean(value) {
 const createAgreementSchema = z.object({
     body: z.object({
         deviceId: z.string().min(1),
+        sharedExchangeDeviceId: z.string().min(1).optional(),
         buyerEmail: z.string().email(),
         buyerNationalId: z.string().min(5).optional(),
         buyerFullName: z.string().min(2),

@@ -3,10 +3,21 @@ const { z } = require('zod');
 const registerSchema = z.object({
     body: z.object({
         email: z.string().email(),
-        phone: z.string().min(7).optional(),
+        phone: z.string().min(7),
         fullName: z.string().min(2),
         password: z.string().min(8),
         businessName: z.string().optional()
+    }),
+    params: z.object({}).default({}),
+    query: z.object({}).default({})
+});
+
+const clientRegisterSchema = z.object({
+    body: z.object({
+        email: z.string().email(),
+        phone: z.string().min(7),
+        fullName: z.string().min(2),
+        password: z.string().min(8)
     }),
     params: z.object({}).default({}),
     query: z.object({}).default({})
@@ -66,6 +77,7 @@ const resendVerificationSchema = z.object({
 
 module.exports = {
     registerSchema,
+    clientRegisterSchema,
     loginSchema,
     clientLoginSchema,
     verifyEmailSchema,

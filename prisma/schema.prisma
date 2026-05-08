@@ -10,10 +10,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum RoleName {
+enum UserType {
+  INDIVIDUAL
+  SHOP
   ADMIN
-  SELLER
-  BUYER
 }
 
 enum DeviceStatus {
@@ -35,6 +35,11 @@ enum PaymentMethod {
   BANK_TRANSFER
   CARD
   OTHER
+}
+
+enum DeviceIdentifierType {
+  IMEI
+  SERIAL
 }
 
 enum FieldDataType {
@@ -65,46 +70,28 @@ model User {
   nationalId   String?  @unique
   phone        String?  @unique
   fullName     String
+  type         UserType @default(INDIVIDUAL)
   passwordHash         String
   isActive             Boolean  @default(true)
   emailVerified        Boolean  @default(false)
   verificationToken    String?  @unique
   resetPasswordToken   String?  @unique
   resetPasswordExpires DateTime?
+  passwordExpiresAt    DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  roles  UserRole[]
   seller Seller?
   buyer  Buyer?
 
   reviewedSubscriptionClaims SubscriptionClaim[] @relation("SubscriptionClaimReviewedBy")
+  reportedStolenDeviceIdentities DeviceIdentity[] @relation("DeviceIdentityReportedBy")
 
   @@index([email])
   @@index([createdAt])
 }
 
-model Role {
-  id          String   @id @default(cuid())
-  name        RoleName @unique
-  description String?
-  createdAt   DateTime @default(now())
 
-  users UserRole[]
-}
-
-model UserRole {
-  id         String   @id @default(cuid())
-  userId     String
-  roleId     String
-  assignedAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, roleId])
-  @@index([roleId])
-}
 
 model Seller {
   id        String   @id @default(cuid())
@@ -134,9 +121,13 @@ model Seller {
   user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   devices            Device[]
   agreementsAsSeller Agreement[] @relation("AgreementSeller")
+  outgoingExchangeAccesses DeviceExchangeAccess[] @relation("DeviceExchangeAccessOwner")
+  incomingExchangeAccesses DeviceExchangeAccess[] @relation("DeviceExchangeAccessRecipient")
 
   subscriptions      SellerSubscription[]
   subscriptionClaims SubscriptionClaim[]
+
+  @@index([createdAt])
 }
 
 model SubscriptionSettings {
@@ -147,6 +138,10 @@ model SubscriptionSettings {
   paymentNumber String @default("0791689396")
   whatsappNumber String @default("")
   receiverNames String @default("")
+  // New fee fields for device operations
+  registerDeviceFee Int @default(500)  // Fee to register a device
+  stolenDeviceFee   Int @default(1000) // Fee to mark device as stolen
+  extraDeviceFee    Int @default(200)  // Fee for extra devices per type for individuals
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
@@ -211,6 +206,9 @@ model DeviceType {
 
   fields  DeviceField[]
   devices Device[]
+
+  identities  DeviceIdentity[]
+  identifiers DeviceIdentifier[]
 }
 
 model DeviceField {
@@ -248,10 +246,28 @@ model Device {
   fieldValues DeviceFieldValue[]
   images      DeviceImage[]
   agreements  Agreement[]
+  exchangeAccess DeviceExchangeAccess?
 
   @@index([sellerId])
   @@index([deviceTypeId])
   @@index([createdAt])
+  @@index([sellerId, createdAt])
+}
+
+model DeviceExchangeAccess {
+  id               String   @id @default(cuid())
+  deviceId         String   @unique
+  ownerSellerId    String
+  grantedToSellerId String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  device           Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  ownerSeller      Seller @relation("DeviceExchangeAccessOwner", fields: [ownerSellerId], references: [id], onDelete: Cascade)
+  grantedToSeller  Seller @relation("DeviceExchangeAccessRecipient", fields: [grantedToSellerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerSellerId])
+  @@index([grantedToSellerId])
 }
 
 model DeviceFieldValue {
@@ -319,6 +335,8 @@ model Agreement {
   @@index([buyerId])
   @@index([status])
   @@index([createdAt])
+  @@index([sellerId, createdAt])
+  @@index([buyerId, createdAt])
 }
 
 model Payment {
@@ -335,4 +353,44 @@ model Payment {
   @@index([agreementId])
   @@index([paidAt])
   @@index([createdAt])
+  @@index([agreementId, paidAt])
+}
+
+model DeviceIdentity {
+  id         String   @id @default(cuid())
+  deviceTypeId String
+
+  isReportedStolen Boolean  @default(false)
+  stolenReportedAt DateTime?
+  stolenDescription String?
+  stolenReportedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deviceType DeviceType @relation(fields: [deviceTypeId], references: [id], onDelete: Restrict)
+  stolenReportedByUser User? @relation("DeviceIdentityReportedBy", fields: [stolenReportedByUserId], references: [id], onDelete: SetNull)
+
+  identifiers DeviceIdentifier[]
+
+  @@index([deviceTypeId])
+  @@index([isReportedStolen])
+  @@index([createdAt])
+}
+
+model DeviceIdentifier {
+  id            String               @id @default(cuid())
+  identityId    String
+  deviceTypeId  String
+  type          DeviceIdentifierType
+  rawValue      String
+  normalizedValue String
+  createdAt     DateTime             @default(now())
+
+  identity   DeviceIdentity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  deviceType DeviceType     @relation(fields: [deviceTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([deviceTypeId, type, normalizedValue])
+  @@index([identityId])
+  @@index([type])
 }

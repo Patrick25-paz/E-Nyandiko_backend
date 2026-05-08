@@ -3,6 +3,7 @@ const { ApiError } = require('../utils/errors');
 const sellerRepository = require('../repositories/seller.repository');
 const deviceRepository = require('../repositories/device.repository');
 const agreementRepository = require('../repositories/agreement.repository');
+const authRepository = require('../repositories/auth.repository');
 const { uploadBuffer } = require('./imageUpload.service');
 
 
@@ -26,15 +27,29 @@ function formatSellerLocationFromParts(data) {
     return (base || extra) ? `${base}${extra}`.trim() : null;
 }
 
-async function getSellerProfile(userId) {
-    const seller = await sellerRepository.findSellerByUserId(userId);
+async function ensureSellerProfile(userId) {
+    const user = await authRepository.findUserById(userId);
+    if (!user) throw new ApiError(404, 'User not found');
+    if (!['SHOP', 'INDIVIDUAL'].includes(user.type)) {
+        throw new ApiError(403, 'Seller profile not available for this account');
+    }
+
+    let seller = await sellerRepository.findSellerByUserId(userId);
+    if (!seller) {
+        await authRepository.createSellerProfile(userId);
+        seller = await sellerRepository.findSellerByUserId(userId);
+    }
+
     if (!seller) throw new ApiError(404, 'Seller profile not found');
     return seller;
 }
 
+async function getSellerProfile(userId) {
+    return ensureSellerProfile(userId);
+}
+
 async function updateSellerProfile(userId, data) {
-    const seller = await sellerRepository.findSellerByUserId(userId);
-    if (!seller) throw new ApiError(404, 'Seller profile not found');
+    const seller = await ensureSellerProfile(userId);
 
     const updateData = {
         businessName: data.businessName,
@@ -77,8 +92,7 @@ async function updateSellerProfile(userId, data) {
 }
 
 async function getSellerDashboardStats(userId) {
-    const seller = await sellerRepository.findSellerByUserId(userId);
-    if (!seller) throw new ApiError(404, 'Seller profile not found');
+    const seller = await ensureSellerProfile(userId);
 
     const [deviceStats, agreementStats] = await Promise.all([
         deviceRepository.getStatsForSeller(seller.id),
@@ -94,8 +108,7 @@ async function getSellerDashboardStats(userId) {
 async function searchClients(userId, query) {
     if (!query || query.trim().length === 0) return [];
 
-    const seller = await sellerRepository.findSellerByUserId(userId);
-    if (!seller) throw new ApiError(404, 'Seller profile not found');
+    const seller = await ensureSellerProfile(userId);
 
     const users = await sellerRepository.searchClients(seller.id, query.trim());
 
@@ -131,10 +144,34 @@ async function searchClients(userId, query) {
     });
 }
 
+async function searchShops(userId, query) {
+    if (!query || query.trim().length === 0) return [];
+
+    await ensureSellerProfile(userId);
+
+    const shops = await sellerRepository.searchShops(query.trim());
+
+    return shops.map((shop) => ({
+        id: shop.id,
+        businessName: shop.businessName,
+        phone: shop.phone,
+        whatsapp: shop.whatsapp,
+        location: shop.location || formatSellerLocationFromParts(shop),
+        logoUrl: shop.logoUrl,
+        user: {
+            id: shop.user?.id,
+            email: shop.user?.email,
+            fullName: shop.user?.fullName,
+            type: shop.user?.type
+        }
+    }));
+}
+
 module.exports = {
     getSellerProfile,
     updateSellerProfile,
     getSellerDashboardStats,
-    searchClients
+    searchClients,
+    searchShops
 };
 

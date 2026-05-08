@@ -7,6 +7,8 @@ const deviceRoutes = require('./device.routes');
 const agreementRoutes = require('./agreement.routes');
 const sellerRoutes = require('./seller.routes');
 const subscriptionRoutes = require('./subscription.routes');
+const deviceIdentityRoutes = require('./deviceIdentity.routes');
+const userRoutes = require('./user.routes');
 
 router.use(healthRoutes);
 router.use('/auth', authRoutes);
@@ -15,5 +17,7 @@ router.use('/devices', deviceRoutes);
 router.use('/agreements', agreementRoutes);
 router.use('/sellers', sellerRoutes);
 router.use('/subscriptions', subscriptionRoutes);
+router.use('/users', userRoutes);
+router.use(deviceIdentityRoutes);
 
 module.exports = router;

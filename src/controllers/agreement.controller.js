@@ -277,8 +277,10 @@ function safeJsonParse(text) {
 async function createAgreement(req, res, next) {
     try {
         const result = await agreementService.createAgreement({
+            userId: req.user.id,
             sellerId: req.user.sellerId,
             deviceId: req.body.deviceId,
+            sharedExchangeDeviceId: req.body.sharedExchangeDeviceId,
             buyerEmail: req.body.buyerEmail,
             buyerNationalId: req.body.buyerNationalId,
             buyerFullName: req.body.buyerFullName,
@@ -316,6 +318,7 @@ async function confirmAgreement(req, res, next) {
 async function listSold(req, res, next) {
     try {
         const agreements = await agreementService.listSoldAgreements({
+            userId: req.user.id,
             sellerId: req.user.sellerId,
             limit: req.query.limit,
             skip: req.query.skip
@@ -351,7 +354,7 @@ async function document(req, res, next) {
         // Access control: allow either Authorization header (req.user is set by auth middleware)
         // OR a short-lived token passed as ?token=... (for iframe/new-tab rendering).
         let userId = req.user?.id || null;
-        let roles = req.user?.roles || [];
+        let userType = req.user?.type || null;
 
         if (!userId) {
             // 1) Try Bearer auth token
@@ -366,7 +369,7 @@ async function document(req, res, next) {
                 }
 
                 userId = payload.sub;
-                roles = payload.roles || [];
+                userType = payload.type || null;
             } else {
                 // 2) Try short-lived document token from query
                 const token = req.query?.token;
@@ -382,21 +385,21 @@ async function document(req, res, next) {
                 if (payload?.typ === 'agreement_document') {
                     if (payload?.agreementId !== agreement.id) throw new ApiError(401, 'Token agreement mismatch');
                     userId = payload.sub;
-                    roles = payload.roles || [];
+                    userType = payload.type || null;
                 } else if (payload?.typ === 'agreement_approval') {
                     if (payload?.agreementId !== agreement.id) throw new ApiError(401, 'Token agreement mismatch');
                     if (payload?.buyerId !== agreement.buyer?.id) throw new ApiError(401, 'Token buyer mismatch');
 
-                    // Treat this as buyer access for the purpose of access checks.
+                    // Treat this as an individual (buyer) for the purpose of access checks.
                     userId = agreement.buyer?.user?.id;
-                    roles = ['BUYER'];
+                    userType = 'INDIVIDUAL';
                 } else {
                     throw new ApiError(401, 'Invalid token type');
                 }
             }
         }
 
-        const isAdmin = roles.includes('ADMIN');
+        const isAdmin = userType === 'ADMIN';
         const isSeller = agreement.seller?.user?.id && agreement.seller.user.id === userId;
         const isBuyer = agreement.buyer?.user?.id && agreement.buyer.user.id === userId;
         if (!isAdmin && !isSeller && !isBuyer) throw new ApiError(403, 'Forbidden');
@@ -672,10 +675,10 @@ async function documentToken(req, res, next) {
         });
 
         const userId = req.user?.id;
-        const roles = req.user?.roles || [];
+        const userType = req.user?.type || null;
         if (!userId) throw new ApiError(401, 'Missing Authorization');
 
-        const isAdmin = roles.includes('ADMIN');
+        const isAdmin = userType === 'ADMIN';
         const isSeller = agreement.seller?.user?.id && agreement.seller.user.id === userId;
         const isBuyer = agreement.buyer?.user?.id && agreement.buyer.user.id === userId;
         if (!isAdmin && !isSeller && !isBuyer) throw new ApiError(403, 'Forbidden');
@@ -685,7 +688,7 @@ async function documentToken(req, res, next) {
             {
                 typ: 'agreement_document',
                 agreementId: agreement.id,
-                roles
+                type: userType
             },
             env.JWT_SECRET,
             {
@@ -705,7 +708,7 @@ async function getAgreement(req, res, next) {
         const agreement = await agreementService.getAgreementById({
             agreementId: req.params.id,
             userId: req.user?.id,
-            roles: req.user?.roles || []
+            userType: req.user?.type || null
         });
         return ok(res, { message: 'Agreement', data: agreement });
     } catch (err) {
@@ -716,8 +719,11 @@ async function getAgreement(req, res, next) {
 async function deleteAgreement(req, res, next) {
     try {
         const { id } = req.params;
-        const sellerId = req.user.sellerId;
-        const result = await agreementService.deleteAgreement({ sellerId, agreementId: id });
+        const result = await agreementService.deleteAgreement({
+            userId: req.user.id,
+            sellerId: req.user.sellerId,
+            agreementId: id
+        });
         res.status(200).json({
             status: 'success',
             data: result

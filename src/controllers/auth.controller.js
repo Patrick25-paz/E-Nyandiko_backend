@@ -10,6 +10,15 @@ async function register(req, res, next) {
     }
 }
 
+async function clientRegister(req, res, next) {
+    try {
+        const result = await authService.clientRegister(req.body);
+        return created(res, { message: 'Registered', data: result });
+    } catch (err) {
+        return next(err);
+    }
+}
+
 async function login(req, res, next) {
     try {
         const result = await authService.login(req.body);
@@ -71,6 +80,7 @@ async function resetPassword(req, res, next) {
 
 module.exports = {
     register,
+    clientRegister,
     login,
     clientLogin,
     verifyEmail,

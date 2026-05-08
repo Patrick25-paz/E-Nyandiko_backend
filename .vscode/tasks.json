@@ -1,0 +1,10 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Reset Database Schema",
+			"type": "shell",
+			"command": "npx prisma migrate reset --force"
+		}
+	]
+}

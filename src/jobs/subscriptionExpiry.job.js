@@ -20,7 +20,7 @@ function startSubscriptionExpiryJob() {
     runExpirySweep({ reason: 'startup' });
 
     // Run daily at 23:59:59 Africa/Kigali time.
-    cron.schedule(
+    const task = cron.schedule(
         '59 59 23 * * *',
         () => {
             runExpirySweep({ reason: 'daily-23:59:59' });
@@ -29,6 +29,8 @@ function startSubscriptionExpiryJob() {
     );
 
     logger.info({ timezone: 'Africa/Kigali' }, 'Subscription expiry cron scheduled (23:59:59 daily)');
+
+    return task;
 }
 
 module.exports = {

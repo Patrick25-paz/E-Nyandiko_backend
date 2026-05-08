@@ -1,6 +1,8 @@
 const env = require('../config/env');
 const { ApiError } = require('../utils/errors');
 const deviceRepository = require('../repositories/device.repository');
+const authRepository = require('../repositories/auth.repository');
+const sellerRepository = require('../repositories/seller.repository');
 const { uploadBuffer } = require('./imageUpload.service');
 
 function parseFields(fieldsRaw) {
@@ -51,8 +53,55 @@ function coerceAndValidateValue(field, value) {
     }
 }
 
-async function createDevice({ sellerId, deviceTypeId, title, fieldsRaw, files }) {
-    if (!sellerId) throw new ApiError(403, 'Seller profile required');
+function formatSellerLocation(data) {
+    if (!data) return null;
+
+    const parts = [
+        data.province,
+        data.district,
+        data.sector,
+        data.cell,
+        data.village
+    ].filter(Boolean);
+
+    const extras = [
+        data.noticeableName ? `Near ${data.noticeableName}` : null,
+        data.houseName ? `House: ${data.houseName}` : null,
+        data.floor ? `Floor: ${data.floor}` : null
+    ].filter(Boolean);
+
+    const base = parts.join(', ');
+    const extra = extras.length ? ` (${extras.join(', ')})` : '';
+    return (base || extra) ? `${base}${extra}`.trim() : (data.location || null);
+}
+
+async function resolveSellerContext({ userId, sellerId }) {
+    const user = await authRepository.findUserById(userId);
+    if (!user) throw new ApiError(404, 'User not found');
+
+    if (!['SHOP', 'INDIVIDUAL'].includes(user.type)) {
+        throw new ApiError(403, 'Seller profile required');
+    }
+
+    if (sellerId) {
+        return { sellerId, user };
+    }
+
+    const seller = await authRepository.createSellerProfile(userId);
+    return { sellerId: seller.id, user };
+}
+
+async function createDevice({ userId, sellerId, deviceTypeId, title, fieldsRaw, files }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+    const effectiveSellerId = sellerContext.sellerId;
+    const user = sellerContext.user;
+
+    if (user.type === 'INDIVIDUAL') {
+        const activeDeviceCount = await deviceRepository.countActiveDevicesBySeller(effectiveSellerId);
+        if (activeDeviceCount >= 1) {
+            throw new ApiError(409, 'Individual users can only register one active device');
+        }
+    }
 
     const deviceType = await deviceRepository.findDeviceTypeWithFields(deviceTypeId);
     if (!deviceType || !deviceType.isActive) throw new ApiError(404, 'Device type not found');
@@ -83,7 +132,7 @@ async function createDevice({ sellerId, deviceTypeId, title, fieldsRaw, files })
     }
 
     const device = await deviceRepository.createDeviceWithValues({
-        sellerId,
+        sellerId: effectiveSellerId,
         deviceTypeId,
         title: title || null,
         values
@@ -116,22 +165,120 @@ async function createDevice({ sellerId, deviceTypeId, title, fieldsRaw, files })
     return device;
 }
 
-async function listSellerDevices({ sellerId, limit, skip }) {
-    if (!sellerId) throw new ApiError(403, 'Seller profile required');
-    return deviceRepository.listDevicesBySeller(sellerId, { limit, skip });
+async function listSellerDevices({ userId, sellerId, limit, skip }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+    return deviceRepository.listDevicesBySeller(sellerContext.sellerId, { limit, skip });
 }
 
 
-async function getSellerDevice({ sellerId, deviceId }) {
-    if (!sellerId) throw new ApiError(403, 'Seller profile required');
+async function getSellerDevice({ userId, sellerId, deviceId }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
 
-    const device = await deviceRepository.findDeviceDetailForSeller({ sellerId, deviceId });
+    const device = await deviceRepository.findDeviceDetailForSeller({ sellerId: sellerContext.sellerId, deviceId });
     if (!device) throw new ApiError(404, 'Device not found');
     return device;
+}
+
+async function grantDeviceExchangeAccess({ userId, sellerId, deviceId, grantedToSellerId }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+
+    if (sellerContext.user.type !== 'INDIVIDUAL') {
+        throw new ApiError(403, 'Only individual users can grant exchange access');
+    }
+
+    const device = await deviceRepository.findDeviceDetailForSeller({
+        sellerId: sellerContext.sellerId,
+        deviceId
+    });
+    if (!device) throw new ApiError(404, 'Device not found');
+    if (device.status !== 'ACTIVE') throw new ApiError(409, 'Only active devices can be shared for exchange');
+
+    if (device.exchangeAccess && device.exchangeAccess.grantedToSellerId && device.exchangeAccess.grantedToSellerId !== grantedToSellerId) {
+        throw new ApiError(409, 'This device is already granted to another shop. Cancel the grant first.');
+    }
+
+    const pendingAgreement = (device.agreements || []).find((agreement) => agreement.status === 'PENDING');
+    if (pendingAgreement) {
+        throw new ApiError(409, 'This device already has a pending agreement');
+    }
+
+    const targetSeller = await sellerRepository.findSellerById(grantedToSellerId);
+    if (!targetSeller || targetSeller.user?.type !== 'SHOP') {
+        throw new ApiError(404, 'Shop not found');
+    }
+
+    if (targetSeller.id === sellerContext.sellerId) {
+        throw new ApiError(409, 'You cannot grant exchange access to your own account');
+    }
+
+    return deviceRepository.upsertDeviceExchangeAccess({
+        deviceId,
+        ownerSellerId: sellerContext.sellerId,
+        grantedToSellerId
+    });
+}
+
+async function revokeDeviceExchangeAccess({ userId, sellerId, deviceId }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+
+    if (sellerContext.user.type !== 'INDIVIDUAL') {
+        throw new ApiError(403, 'Only individual users can revoke exchange access');
+    }
+
+    const device = await deviceRepository.findDeviceDetailForSeller({
+        sellerId: sellerContext.sellerId,
+        deviceId
+    });
+    if (!device) throw new ApiError(404, 'Device not found');
+
+    if (!device.exchangeAccess) {
+        return { revoked: false };
+    }
+
+    const pendingAgreement = (device.agreements || []).find((agreement) => agreement.status === 'PENDING');
+    if (pendingAgreement) {
+        throw new ApiError(409, 'This device has a pending agreement');
+    }
+
+    await deviceRepository.deleteExchangeAccessByDeviceId(deviceId);
+    return { revoked: true };
+}
+
+async function listSharedExchangeDevices({ userId, sellerId }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+
+    if (sellerContext.user.type !== 'SHOP') {
+        throw new ApiError(403, 'Only shop users can access shared exchange devices');
+    }
+
+    const shared = await deviceRepository.listSharedDevicesForSeller(sellerContext.sellerId);
+    return shared.map((entry) => ({
+        accessId: entry.id,
+        sharedAt: entry.updatedAt,
+        device: {
+            ...entry.device,
+            owner: {
+                sellerId: entry.device.seller?.id || null,
+                businessName: entry.device.seller?.businessName || null,
+                phone: entry.device.seller?.phone || entry.device.seller?.user?.phone || null,
+                location: formatSellerLocation(entry.device.seller),
+                user: {
+                    id: entry.device.seller?.user?.id || null,
+                    fullName: entry.device.seller?.user?.fullName || null,
+                    email: entry.device.seller?.user?.email || null,
+                    nationalId: entry.device.seller?.user?.nationalId || null,
+                    phone: entry.device.seller?.user?.phone || null
+                }
+            }
+        }
+    }));
 }
 
 module.exports = {
     createDevice,
     listSellerDevices,
-    getSellerDevice
+    getSellerDevice,
+    grantDeviceExchangeAccess,
+    revokeDeviceExchangeAccess,
+    listSharedExchangeDevices
 };

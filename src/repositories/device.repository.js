@@ -120,8 +120,32 @@ async function findDeviceById(deviceId) {
     });
 }
 
+async function getDeviceFieldsForStolenCheck(deviceId) {
+    return prisma.device.findUnique({
+        where: { id: deviceId },
+        select: {
+            id: true,
+            deviceTypeId: true,
+            fieldValues: {
+                select: {
+                    value: true,
+                    deviceField: {
+                        select: {
+                            key: true,
+                            dataType: true
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 async function listDevicesBySeller(sellerId, options = {}) {
-    // Performance note: if this list grows large, consider adding a composite index on (sellerId, createdAt).
+    // Performance note: composite index on (sellerId, createdAt) improves pagination performance.
+    const limit = Math.min(Number(options.limit) || 20, 100); // Default 20, max 100 to prevent large data transfers
+    const skip = Math.max(Number(options.skip) || 0, 0);
+
     return prisma.device.findMany({
         where: { sellerId },
         // Optimization: the frontend only needs a subset of fields (no images currently).
@@ -136,8 +160,6 @@ async function listDevicesBySeller(sellerId, options = {}) {
                     name: true
                 }
             },
-            // Optimization: fetch only the latest accepted agreement id for SOLD devices.
-            // Index note: `Agreement.deviceId` is indexed; filtering by status also benefits from the `Agreement.status` index.
             // Optimization: fetch only the latest accepted or pending agreement
             agreements: {
                 where: { status: { in: ['ACCEPTED', 'PENDING'] } },
@@ -152,14 +174,14 @@ async function listDevicesBySeller(sellerId, options = {}) {
             }
         },
         orderBy: { createdAt: 'desc' },
-        take: options.limit ? Number(options.limit) : undefined,
-        skip: options.skip ? Number(options.skip) : undefined
+        take: limit,
+        skip: skip
     });
 }
 
 
 async function findDeviceDetailForSeller({ sellerId, deviceId }) {
-    return prisma.device.findFirst({
+    const device = await prisma.device.findFirst({
         where: { id: deviceId, sellerId },
         // Optimization: fetch only fields rendered by SellerDeviceDetailPage.
         select: {
@@ -218,6 +240,276 @@ async function findDeviceDetailForSeller({ sellerId, deviceId }) {
             }
         }
     });
+
+    if (!device) return null;
+
+    const exchangeAccess = await prisma.deviceExchangeAccess.findUnique({
+        where: { deviceId },
+        select: {
+            id: true,
+            grantedToSellerId: true,
+            createdAt: true,
+            updatedAt: true,
+            grantedToSeller: {
+                select: {
+                    id: true,
+                    businessName: true,
+                    phone: true,
+                    location: true,
+                    logoUrl: true,
+                    user: {
+                        select: {
+                            id: true,
+                            fullName: true,
+                            email: true,
+                            type: true
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    return {
+        ...device,
+        exchangeAccess
+    };
+}
+
+async function upsertDeviceExchangeAccess({ deviceId, ownerSellerId, grantedToSellerId }) {
+    return prisma.deviceExchangeAccess.upsert({
+        where: { deviceId },
+        update: {
+            ownerSellerId,
+            grantedToSellerId
+        },
+        create: {
+            deviceId,
+            ownerSellerId,
+            grantedToSellerId
+        },
+        select: {
+            id: true,
+            deviceId: true,
+            ownerSellerId: true,
+            grantedToSellerId: true,
+            createdAt: true,
+            updatedAt: true,
+            grantedToSeller: {
+                select: {
+                    id: true,
+                    businessName: true,
+                    phone: true,
+                    location: true,
+                    logoUrl: true,
+                    user: {
+                        select: {
+                            id: true,
+                            fullName: true,
+                            email: true,
+                            type: true
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function listSharedDevicesForSeller(grantedToSellerId) {
+    return prisma.deviceExchangeAccess.findMany({
+        where: {
+            grantedToSellerId,
+            device: {
+                status: 'ACTIVE'
+            }
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: {
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+            device: {
+                select: {
+                    id: true,
+                    title: true,
+                    status: true,
+                    createdAt: true,
+                    deviceType: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
+                    fieldValues: {
+                        select: {
+                            id: true,
+                            value: true,
+                            deviceField: {
+                                select: {
+                                    id: true,
+                                    key: true,
+                                    label: true,
+                                    dataType: true
+                                }
+                            }
+                        }
+                    },
+                    images: {
+                        orderBy: { sortOrder: 'asc' },
+                        select: {
+                            id: true,
+                            url: true,
+                            publicId: true,
+                            sortOrder: true
+                        }
+                    },
+                    seller: {
+                        select: {
+                            id: true,
+                            businessName: true,
+                            phone: true,
+                            location: true,
+                            province: true,
+                            district: true,
+                            sector: true,
+                            cell: true,
+                            village: true,
+                            noticeableName: true,
+                            houseName: true,
+                            floor: true,
+                            user: {
+                                select: {
+                                    id: true,
+                                    fullName: true,
+                                    email: true,
+                                    nationalId: true,
+                                    phone: true,
+                                    type: true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function findSharedDeviceForRecipient({ grantedToSellerId, deviceId }) {
+    return prisma.deviceExchangeAccess.findFirst({
+        where: {
+            deviceId,
+            grantedToSellerId,
+            device: {
+                status: 'ACTIVE'
+            }
+        },
+        select: {
+            id: true,
+            createdAt: true,
+            updatedAt: true,
+            device: {
+                select: {
+                    id: true,
+                    title: true,
+                    status: true,
+                    deviceTypeId: true,
+                    deviceType: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
+                    fieldValues: {
+                        select: {
+                            id: true,
+                            value: true,
+                            deviceField: {
+                                select: {
+                                    id: true,
+                                    key: true,
+                                    label: true,
+                                    dataType: true
+                                }
+                            }
+                        }
+                    },
+                    images: {
+                        orderBy: { sortOrder: 'asc' },
+                        select: {
+                            id: true,
+                            url: true,
+                            publicId: true,
+                            sortOrder: true
+                        }
+                    },
+                    seller: {
+                        select: {
+                            id: true,
+                            businessName: true,
+                            phone: true,
+                            whatsapp: true,
+                            location: true,
+                            province: true,
+                            district: true,
+                            sector: true,
+                            cell: true,
+                            village: true,
+                            noticeableName: true,
+                            houseName: true,
+                            floor: true,
+                            user: {
+                                select: {
+                                    id: true,
+                                    fullName: true,
+                                    email: true,
+                                    nationalId: true,
+                                    phone: true,
+                                    type: true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function deleteExchangeAccessByDeviceId(deviceId) {
+    return prisma.deviceExchangeAccess.deleteMany({
+        where: { deviceId }
+    });
+}
+
+async function swapDeviceOwnersForExchange({ shopDeviceId, sharedDeviceId, shopSellerId, individualSellerId }) {
+    return prisma.$transaction(async (tx) => {
+        await tx.device.update({
+            where: { id: shopDeviceId },
+            data: {
+                sellerId: individualSellerId,
+                status: 'ACTIVE'
+            }
+        });
+
+        await tx.device.update({
+            where: { id: sharedDeviceId },
+            data: {
+                sellerId: shopSellerId,
+                status: 'ACTIVE'
+            }
+        });
+
+        await tx.deviceExchangeAccess.deleteMany({
+            where: {
+                OR: [
+                    { deviceId: shopDeviceId },
+                    { deviceId: sharedDeviceId }
+                ]
+            }
+        });
+    });
 }
 
 async function getStatsForSeller(sellerId) {
@@ -242,6 +534,15 @@ async function getStatsForSeller(sellerId) {
     return { total, sold, active, draft };
 }
 
+async function countActiveDevicesBySeller(sellerId) {
+    return prisma.device.count({
+        where: {
+            sellerId,
+            status: 'ACTIVE'
+        }
+    });
+}
+
 
 module.exports = {
     findDeviceTypeWithFields,
@@ -249,8 +550,15 @@ module.exports = {
     addDeviceImages,
     getDeviceForAgreement,
     findDeviceById,
+    getDeviceFieldsForStolenCheck,
     listDevicesBySeller,
     findDeviceDetailForSeller,
-    getStatsForSeller
+    upsertDeviceExchangeAccess,
+    listSharedDevicesForSeller,
+    findSharedDeviceForRecipient,
+    deleteExchangeAccessByDeviceId,
+    swapDeviceOwnersForExchange,
+    getStatsForSeller,
+    countActiveDevicesBySeller
 };
 

@@ -2,7 +2,7 @@ const router = require('express').Router();
 
 const agreementController = require('../controllers/agreement.controller');
 const auth = require('../middlewares/auth.middleware');
-const requireRoles = require('../middlewares/role.middleware');
+const requireType = require('../middlewares/type.middleware');
 const validate = require('../middlewares/validate.middleware');
 const upload = require('../middlewares/upload.middleware');
 const {
@@ -23,7 +23,7 @@ const {
 router.post(
     '/',
     auth,
-    requireRoles('SELLER'),
+    requireType('SHOP', 'INDIVIDUAL'),
     upload.fields([
         { name: 'images', maxCount: 5 },
         { name: 'buyerImage', maxCount: 1 }
@@ -33,16 +33,16 @@ router.post(
 );
 
 // Seller views agreements where they are the seller
-router.get('/sold', auth, requireRoles('SELLER'), validate(listAgreementsSchema), agreementController.listSold);
+router.get('/sold', auth, requireType('SHOP', 'INDIVIDUAL'), validate(listAgreementsSchema), agreementController.listSold);
 
 // Buyer views agreements where they are the buyer
-router.get('/bought', auth, requireRoles('BUYER'), validate(listAgreementsSchema), agreementController.listBought);
+router.get('/bought', auth, requireType('INDIVIDUAL'), validate(listAgreementsSchema), agreementController.listBought);
 
 // Buyer confirms agreement -> becomes immutable
 router.patch(
     '/:id/confirm',
     auth,
-    requireRoles('BUYER'),
+    requireType('INDIVIDUAL'),
     validate(confirmAgreementSchema),
     agreementController.confirmAgreement
 );
@@ -65,7 +65,7 @@ router.post(
 router.delete(
     '/:id',
     auth,
-    requireRoles('SELLER'),
+    requireType('SHOP', 'INDIVIDUAL'),
     validate(deleteAgreementSchema),
     agreementController.deleteAgreement
 );
@@ -83,7 +83,7 @@ router.get(
 router.get(
     '/:id/document-token',
     auth,
-    requireRoles('ADMIN', 'SELLER', 'BUYER'),
+    requireType('ADMIN', 'SHOP', 'INDIVIDUAL'),
     validate(getAgreementDocumentTokenSchema),
     agreementController.documentToken
 );
@@ -92,7 +92,7 @@ router.get(
 router.get(
     '/:id',
     auth,
-    requireRoles('ADMIN', 'SELLER', 'BUYER'),
+    requireType('ADMIN', 'SHOP', 'INDIVIDUAL'),
     validate(getAgreementSchema),
     agreementController.getAgreement
 );

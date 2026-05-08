@@ -1,5 +1,17 @@
 const { ApiError } = require('../utils/errors');
 const subscriptionRepository = require('../repositories/subscription.repository');
+const { TtlCache } = require('../utils/ttlCache');
+
+const settingsCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_SETTINGS_TTL_MS || 30_000) });
+const adminSellersCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_SELLERS_TTL_MS || 10_000) });
+const adminClaimsCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_CLAIMS_TTL_MS || 5_000) });
+const adminReportCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_REPORT_TTL_MS || 30_000) });
+
+function invalidateAdminSubscriptionCaches() {
+    adminSellersCache.clear();
+    adminClaimsCache.clear();
+    adminReportCache.clear();
+}
 
 function addDays(date, days) {
     const d = new Date(date);
@@ -39,12 +51,16 @@ function startOfNextMonthUtc(year, month1to12) {
 }
 
 async function getSettings() {
-    return subscriptionRepository.getOrCreateSettings();
+    return settingsCache.getOrSet('settings', () => subscriptionRepository.getOrCreateSettings());
 }
 
-async function updateSettings(user, { monthlyFee, currency, paymentNumber, whatsappNumber, receiverNames }) {
-    if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
-    return subscriptionRepository.updateSettings({ monthlyFee, currency, paymentNumber, whatsappNumber, receiverNames });
+async function updateSettings(user, { monthlyFee, currency, paymentNumber, whatsappNumber, receiverNames, registerDeviceFee, stolenDeviceFee, extraDeviceFee }) {
+    if (user?.type !== 'ADMIN') throw new ApiError(403, 'Forbidden');
+
+    const updated = await subscriptionRepository.updateSettings({ monthlyFee, currency, paymentNumber, whatsappNumber, receiverNames, registerDeviceFee, stolenDeviceFee, extraDeviceFee });
+    settingsCache.set('settings', updated);
+    invalidateAdminSubscriptionCaches();
+    return updated;
 }
 
 async function getMySubscriptionOverview(user) {
@@ -52,7 +68,7 @@ async function getMySubscriptionOverview(user) {
 
     const now = new Date();
     const [settings, active, latest, pendingClaim] = await Promise.all([
-        subscriptionRepository.getOrCreateSettings(),
+        settingsCache.getOrSet('settings', () => subscriptionRepository.getOrCreateSettings()),
         subscriptionRepository.findActiveSubscriptionBySellerId(user.sellerId, now),
         subscriptionRepository.findLatestSubscriptionBySellerId(user.sellerId),
         subscriptionRepository.findPendingClaimBySellerId(user.sellerId)
@@ -84,7 +100,7 @@ async function createMyClaim(user) {
 
     const now = new Date();
     const [settings, activeSubscription, pending] = await Promise.all([
-        subscriptionRepository.getOrCreateSettings(),
+        settingsCache.getOrSet('settings', () => subscriptionRepository.getOrCreateSettings()),
         subscriptionRepository.findActiveSubscriptionBySellerId(user.sellerId, now),
         subscriptionRepository.findPendingClaimBySellerId(user.sellerId)
     ]);
@@ -105,7 +121,7 @@ async function createMyClaim(user) {
 }
 
 async function listAdminSellers(user) {
-    if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
+    if (user?.type !== 'ADMIN') throw new ApiError(403, 'Forbidden');
 
     const formatSellerLocation = (seller) => {
         const parts = [seller?.province, seller?.district, seller?.sector, seller?.cell, seller?.village].filter(Boolean);
@@ -120,33 +136,35 @@ async function listAdminSellers(user) {
         return formatted || seller?.location || '-';
     };
 
-    const now = new Date();
-    const sellers = await subscriptionRepository.listSellersWithLatestSubscription();
+    return adminSellersCache.getOrSet('adminSellers', async () => {
+        const now = new Date();
+        const sellers = await subscriptionRepository.listSellersWithLatestSubscription();
 
-    return sellers.map((s) => {
-        const latest = s.subscriptions?.[0] || null;
-        const pendingClaim = s.subscriptionClaims?.[0] || null;
+        return sellers.map((s) => {
+            const latest = s.subscriptions?.[0] || null;
+            const pendingClaim = s.subscriptionClaims?.[0] || null;
 
-        const isActive = Boolean(latest && latest.status === 'ACTIVE' && new Date(latest.endAt) > now);
-        const status = isActive ? 'ACTIVE' : (latest ? 'EXPIRED' : 'NONE');
+            const isActive = Boolean(latest && latest.status === 'ACTIVE' && new Date(latest.endAt) > now);
+            const status = isActive ? 'ACTIVE' : (latest ? 'EXPIRED' : 'NONE');
 
-        return {
-            sellerId: s.id,
-            userId: s.userId,
-            emailVerified: Boolean(s.user?.emailVerified),
-            fullName: s.user?.fullName || '-',
-            email: s.user?.email || '-',
-            phone: s.phone || s.user?.phone || '-',
-            location: formatSellerLocation(s),
-            status,
-            subscription: latest,
-            pendingClaim
-        };
+            return {
+                sellerId: s.id,
+                userId: s.userId,
+                emailVerified: Boolean(s.user?.emailVerified),
+                fullName: s.user?.fullName || '-',
+                email: s.user?.email || '-',
+                phone: s.phone || s.user?.phone || '-',
+                location: formatSellerLocation(s),
+                status,
+                subscription: latest,
+                pendingClaim
+            };
+        });
     });
 }
 
 async function adminDeleteUnverifiedSeller(user, sellerId) {
-    if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
+    if (user?.type !== 'ADMIN') throw new ApiError(403, 'Forbidden');
 
     const seller = await subscriptionRepository.getSellerForAdminDelete(sellerId);
     if (!seller) throw new ApiError(404, 'Seller not found');
@@ -162,16 +180,19 @@ async function adminDeleteUnverifiedSeller(user, sellerId) {
     }
 
     // Deleting the user cascades to Seller via onDelete: Cascade.
-    return subscriptionRepository.deleteUserById(seller.userId);
+    const deleted = await subscriptionRepository.deleteUserById(seller.userId);
+    invalidateAdminSubscriptionCaches();
+    return deleted;
 }
 
-async function listClaims(user, { status }) {
-    if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
-    return subscriptionRepository.listClaims({ status });
+async function listClaims(user, { status, limit, skip }) {
+    if (user?.type !== 'ADMIN') throw new ApiError(403, 'Forbidden');
+    const key = `claims:${status || 'ALL'}:${limit || '30'}:${skip || '0'}`;
+    return adminClaimsCache.getOrSet(key, () => subscriptionRepository.listClaims({ status }, { limit, skip }));
 }
 
 async function approveClaim(user, claimId) {
-    if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
+    if (user?.type !== 'ADMIN') throw new ApiError(403, 'Forbidden');
 
     const claim = await subscriptionRepository.getClaimById(claimId);
     if (!claim) throw new ApiError(404, 'Claim not found');
@@ -188,34 +209,45 @@ async function approveClaim(user, claimId) {
     });
 
     if (!result?.subscription) throw new ApiError(500, 'Failed to create subscription');
+    invalidateAdminSubscriptionCaches();
     return result;
 }
 
 async function rejectClaim(user, claimId) {
-    if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
+    if (user?.type !== 'ADMIN') throw new ApiError(403, 'Forbidden');
 
     const claim = await subscriptionRepository.getClaimById(claimId);
     if (!claim) throw new ApiError(404, 'Claim not found');
     if (claim.status !== 'CLAIMED') throw new ApiError(409, 'Claim is already reviewed');
 
-    return subscriptionRepository.rejectClaim({ claimId, reviewedByUserId: user.id });
+    const updated = await subscriptionRepository.rejectClaim({ claimId, reviewedByUserId: user.id });
+    invalidateAdminSubscriptionCaches();
+    return updated;
 }
 
 async function getReport(user, { month, year }) {
-    if (!user?.roles?.includes('ADMIN')) throw new ApiError(403, 'Forbidden');
+    if (user?.type !== 'ADMIN') throw new ApiError(403, 'Forbidden');
 
-    const startInclusive = startOfMonthUtc(year, month);
-    const endExclusive = startOfNextMonthUtc(year, month);
+    const cacheKey = `report:${year}-${month}`;
+    const ttlMs = Number(process.env.CACHE_ADMIN_REPORT_TTL_MS || 30_000);
+    return adminReportCache.getOrSet(
+        cacheKey,
+        async () => {
+            const startInclusive = startOfMonthUtc(year, month);
+            const endExclusive = startOfNextMonthUtc(year, month);
 
-    const rows = await subscriptionRepository.listSubscriptionsInRange({ startInclusive, endExclusive });
+            const rows = await subscriptionRepository.listSubscriptionsInRange({ startInclusive, endExclusive });
 
-    return {
-        month,
-        year,
-        startInclusive,
-        endExclusive,
-        rows
-    };
+            return {
+                month,
+                year,
+                startInclusive,
+                endExclusive,
+                rows
+            };
+        },
+        ttlMs
+    );
 }
 
 module.exports = {

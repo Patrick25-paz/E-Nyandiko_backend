@@ -45,10 +45,22 @@ async function searchClients(req, res, next) {
     }
 }
 
+async function searchShops(req, res, next) {
+    try {
+        const userId = req.user.id;
+        const query = req.query.q;
+        const shops = await sellerService.searchShops(userId, query);
+        return ok(res, { message: 'Shops found', data: shops });
+    } catch (err) {
+        return next(err);
+    }
+}
+
 module.exports = {
     getProfile,
     updateProfile,
     getDashboardStats,
-    searchClients
+    searchClients,
+    searchShops
 };
 

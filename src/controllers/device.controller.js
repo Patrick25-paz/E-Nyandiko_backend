@@ -4,6 +4,7 @@ const { created, ok } = require('../utils/response');
 async function createDevice(req, res, next) {
     try {
         const device = await deviceService.createDevice({
+            userId: req.user.id,
             sellerId: req.user.sellerId,
             deviceTypeId: req.body.deviceTypeId,
             title: req.body.title,
@@ -20,6 +21,7 @@ async function createDevice(req, res, next) {
 async function listMyDevices(req, res, next) {
     try {
         const devices = await deviceService.listSellerDevices({
+            userId: req.user.id,
             sellerId: req.user.sellerId,
             limit: req.query.limit,
             skip: req.query.skip
@@ -34,6 +36,7 @@ async function listMyDevices(req, res, next) {
 async function getMyDevice(req, res, next) {
     try {
         const device = await deviceService.getSellerDevice({
+            userId: req.user.id,
             sellerId: req.user.sellerId,
             deviceId: req.params.id
         });
@@ -43,8 +46,50 @@ async function getMyDevice(req, res, next) {
     }
 }
 
+async function grantExchangeAccess(req, res, next) {
+    try {
+        const result = await deviceService.grantDeviceExchangeAccess({
+            userId: req.user.id,
+            sellerId: req.user.sellerId,
+            deviceId: req.params.id,
+            grantedToSellerId: req.body.grantedToSellerId
+        });
+        return ok(res, { message: 'Exchange access granted', data: result });
+    } catch (err) {
+        return next(err);
+    }
+}
+
+async function revokeExchangeAccess(req, res, next) {
+    try {
+        const result = await deviceService.revokeDeviceExchangeAccess({
+            userId: req.user.id,
+            sellerId: req.user.sellerId,
+            deviceId: req.params.id
+        });
+        return ok(res, { message: 'Exchange access revoked', data: result });
+    } catch (err) {
+        return next(err);
+    }
+}
+
+async function listSharedExchangeDevices(req, res, next) {
+    try {
+        const devices = await deviceService.listSharedExchangeDevices({
+            userId: req.user.id,
+            sellerId: req.user.sellerId
+        });
+        return ok(res, { message: 'Shared exchange devices', data: devices });
+    } catch (err) {
+        return next(err);
+    }
+}
+
 module.exports = {
     createDevice,
     listMyDevices,
-    getMyDevice
+    getMyDevice,
+    grantExchangeAccess,
+    revokeExchangeAccess,
+    listSharedExchangeDevices
 };

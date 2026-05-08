@@ -2,14 +2,20 @@ const { prisma } = require('../config/database');
 const { settingsId } = require('../validators/subscription.validator');
 
 async function getOrCreateSettings() {
-    return prisma.subscriptionSettings.upsert({
-        where: { id: settingsId },
-        update: {},
-        create: { id: settingsId }
-    });
+    const existing = await prisma.subscriptionSettings.findUnique({ where: { id: settingsId } });
+    if (existing) return existing;
+
+    try {
+        return await prisma.subscriptionSettings.create({ data: { id: settingsId } });
+    } catch (err) {
+        // Another request may have created it; fall back to read.
+        const row = await prisma.subscriptionSettings.findUnique({ where: { id: settingsId } });
+        if (row) return row;
+        throw err;
+    }
 }
 
-async function updateSettings({ monthlyFee, currency, paymentNumber, whatsappNumber, receiverNames }) {
+async function updateSettings({ monthlyFee, currency, paymentNumber, whatsappNumber, receiverNames, registerDeviceFee, stolenDeviceFee, extraDeviceFee }) {
     return prisma.subscriptionSettings.upsert({
         where: { id: settingsId },
         update: {
@@ -17,7 +23,10 @@ async function updateSettings({ monthlyFee, currency, paymentNumber, whatsappNum
             ...(currency ? { currency } : {}),
             ...(typeof paymentNumber === 'string' ? { paymentNumber } : {}),
             ...(typeof whatsappNumber === 'string' ? { whatsappNumber } : {}),
-            ...(typeof receiverNames === 'string' ? { receiverNames } : {})
+            ...(typeof receiverNames === 'string' ? { receiverNames } : {}),
+            ...(typeof registerDeviceFee === 'number' ? { registerDeviceFee } : {}),
+            ...(typeof stolenDeviceFee === 'number' ? { stolenDeviceFee } : {}),
+            ...(typeof extraDeviceFee === 'number' ? { extraDeviceFee } : {})
         },
         create: {
             id: settingsId,
@@ -25,7 +34,10 @@ async function updateSettings({ monthlyFee, currency, paymentNumber, whatsappNum
             ...(currency ? { currency } : {}),
             ...(typeof paymentNumber === 'string' ? { paymentNumber } : {}),
             ...(typeof whatsappNumber === 'string' ? { whatsappNumber } : {}),
-            ...(typeof receiverNames === 'string' ? { receiverNames } : {})
+            ...(typeof receiverNames === 'string' ? { receiverNames } : {}),
+            ...(typeof registerDeviceFee === 'number' ? { registerDeviceFee } : {}),
+            ...(typeof stolenDeviceFee === 'number' ? { stolenDeviceFee } : {}),
+            ...(typeof extraDeviceFee === 'number' ? { extraDeviceFee } : {})
         }
     });
 }
@@ -136,7 +148,11 @@ async function createClaim({ sellerId, amount, currency }) {
     });
 }
 
-async function listSellersWithLatestSubscription() {
+async function listSellersWithLatestSubscription(options = {}) {
+    // Admin list: default to 50 sellers per page, max 200
+    const limit = Math.min(Number(options.limit) || 50, 200);
+    const skip = Math.max(Number(options.skip) || 0, 0);
+
     return prisma.seller.findMany({
         select: {
             id: true,
@@ -190,7 +206,9 @@ async function listSellersWithLatestSubscription() {
                 }
             }
         },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: skip
     });
 }
 
@@ -220,7 +238,11 @@ async function deleteUserById(userId) {
     });
 }
 
-async function listClaims({ status }) {
+async function listClaims({ status }, options = {}) {
+    // Admin list: default to 30 claims per page, max 100
+    const limit = Math.min(Number(options.limit) || 30, 100);
+    const skip = Math.max(Number(options.skip) || 0, 0);
+
     return prisma.subscriptionClaim.findMany({
         where: status ? { status } : {},
         select: {
@@ -240,7 +262,9 @@ async function listClaims({ status }) {
             },
             reviewedBy: { select: { id: true, fullName: true, email: true } }
         },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: skip
     });
 }
 

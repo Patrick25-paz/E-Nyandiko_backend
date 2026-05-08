@@ -3,9 +3,10 @@ const router = require('express').Router();
 const authController = require('../controllers/auth.controller');
 const validate = require('../middlewares/validate.middleware');
 const auth = require('../middlewares/auth.middleware');
-const { 
-    registerSchema, 
-    loginSchema, 
+const {
+    registerSchema,
+    clientRegisterSchema,
+    loginSchema,
     clientLoginSchema,
     verifyEmailSchema,
     forgotPasswordSchema,
@@ -14,6 +15,7 @@ const {
 } = require('../validators/auth.validator');
 
 router.post('/register', validate(registerSchema), authController.register);
+router.post('/client/register', validate(clientRegisterSchema), authController.clientRegister);
 router.post('/login', validate(loginSchema), authController.login);
 router.post('/client/login', validate(clientLoginSchema), authController.clientLogin);
 

@@ -2,11 +2,13 @@ const { ApiError } = require('../utils/errors');
 const agreementRepository = require('../repositories/agreement.repository');
 const authRepository = require('../repositories/auth.repository');
 const deviceRepository = require('../repositories/device.repository');
+const deviceIdentityRepository = require('../repositories/deviceIdentity.repository');
 const { hashPassword } = require('../utils/hash');
 const { uploadBuffer } = require('./imageUpload.service');
 const env = require('../config/env');
 const jwt = require('jsonwebtoken');
 const { sendAgreementApprovalEmail } = require('../utils/email');
+const { buildIdentifiers } = require('./deviceIdentity.service');
 
 function createAgreementApprovalToken({ agreementId, buyerId }) {
     return jwt.sign(
@@ -47,6 +49,51 @@ function generatePin() {
     return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+function generateTempPassword() {
+    const n = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    return `Enyand@${n}`;
+}
+
+function formatSellerLocation(data) {
+    if (!data) return null;
+
+    const parts = [
+        data.province,
+        data.district,
+        data.sector,
+        data.cell,
+        data.village
+    ].filter(Boolean);
+
+    const extras = [
+        data.noticeableName ? `Near ${data.noticeableName}` : null,
+        data.houseName ? `House: ${data.houseName}` : null,
+        data.floor ? `Floor: ${data.floor}` : null
+    ].filter(Boolean);
+
+    const base = parts.join(', ');
+    const extra = extras.length ? ` (${extras.join(', ')})` : '';
+    return (base || extra) ? `${base}${extra}`.trim() : (data.location || null);
+}
+
+function mapDeviceFieldValues(fieldValues = []) {
+    return fieldValues.reduce((acc, entry) => {
+        const key = entry.deviceField?.key;
+        if (!key) return acc;
+        acc[key] = entry.value;
+        return acc;
+    }, {});
+}
+
+function safeJsonParse(value) {
+    if (!value || typeof value !== 'string') return null;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+}
+
 async function createWalkInBuyer({ buyerEmail, buyerNationalId, buyerFullName }) {
     // We must always create a unique email because Prisma requires it.
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -77,10 +124,9 @@ async function createWalkInBuyer({ buyerEmail, buyerNationalId, buyerFullName })
             phone: null,
             passwordHash,
             clientCode,
-            nationalId: buyerNationalId || null
+            nationalId: buyerNationalId || null,
+            type: 'INDIVIDUAL'
         });
-
-        await authRepository.assignRole(user.id, 'BUYER');
         await authRepository.createBuyerProfile(user.id);
 
         const authUser = await authRepository.getAuthUserById(user.id);
@@ -102,9 +148,69 @@ async function createWalkInBuyer({ buyerEmail, buyerNationalId, buyerFullName })
     throw new ApiError(500, 'Failed to generate client credentials');
 }
 
+async function createEmailBuyerWithTempPassword({ buyerEmail, buyerNationalId, buyerFullName }) {
+    if (!buyerEmail) throw new ApiError(422, 'Buyer email is required');
+
+    const existingByEmail = await authRepository.findUserByEmail(buyerEmail);
+    if (existingByEmail) throw new ApiError(409, 'Email already registered');
+
+    if (buyerNationalId) {
+        const existingByNid = await authRepository.findUserByNationalId(buyerNationalId);
+        if (existingByNid) throw new ApiError(409, 'National ID already registered');
+    }
+
+    const tempPassword = generateTempPassword();
+    const passwordHash = await hashPassword(tempPassword);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const user = await authRepository.createUser({
+        email: buyerEmail,
+        fullName: buyerFullName || 'Client',
+        phone: null,
+        passwordHash,
+        nationalId: buyerNationalId || null,
+        type: 'INDIVIDUAL',
+        emailVerified: true,
+        verificationToken: null,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+        passwordExpiresAt: expiresAt
+    });
+    await authRepository.createBuyerProfile(user.id);
+
+    const authUser = await authRepository.getAuthUserById(user.id);
+
+    return {
+        buyerUser: authUser,
+        clientAuth: {
+            email: buyerEmail,
+            password: tempPassword,
+            expiresAt
+        }
+    };
+}
+
+async function resolveSellerContext({ userId, sellerId }) {
+    const user = await authRepository.findUserById(userId);
+    if (!user) throw new ApiError(404, 'User not found');
+
+    if (!['SHOP', 'INDIVIDUAL'].includes(user.type)) {
+        throw new ApiError(403, 'Seller profile required');
+    }
+
+    if (sellerId) {
+        return { sellerId, user };
+    }
+
+    const seller = await authRepository.createSellerProfile(userId);
+    return { sellerId: seller.id, user };
+}
+
 async function createAgreement({
+    userId,
     sellerId,
     deviceId,
+    sharedExchangeDeviceId,
     buyerEmail,
     buyerNationalId,
     buyerFullName,
@@ -115,17 +221,105 @@ async function createAgreement({
     sendEmail,
     files
 }) {
-    if (!sellerId) throw new ApiError(403, 'Seller profile required');
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+    const effectiveSellerId = sellerContext.sellerId;
+    const isShopUser = sellerContext.user.type === 'SHOP';
+
+    const device = await deviceRepository.findDeviceById(deviceId);
+    if (!device) throw new ApiError(404, 'Device not found');
+    if (device.sellerId !== effectiveSellerId) throw new ApiError(403, 'You can only create agreements for your own devices');
+
+    // Stolen check: only works when the device type defines identifier field keys (e.g. "imei", "serialNumber").
+    const deviceForCheck = await deviceRepository.getDeviceFieldsForStolenCheck(deviceId);
+    if (deviceForCheck?.fieldValues?.length) {
+        const raw = {};
+        for (const fv of deviceForCheck.fieldValues) {
+            const key = String(fv.deviceField?.key || '').toLowerCase();
+
+            if (key === 'imei') raw.imei = fv.value;
+            if (key === 'serialnumber' || key === 'serial_number' || key === 'serial' || key === 'sn') raw.serialNumber = fv.value;
+        }
+
+        const identifiers = buildIdentifiers({ imei: raw.imei, serialNumber: raw.serialNumber, strict: false });
+
+        for (const i of identifiers) {
+            const stolen = await deviceIdentityRepository.findStolenIdentityByIdentifier({
+                deviceTypeId: deviceForCheck.deviceTypeId,
+                type: i.type,
+                normalizedValue: i.normalizedValue
+            });
+
+            if (stolen) {
+                throw new ApiError(409, 'Device is reported stolen', {
+                    isReportedStolen: true,
+                    deviceTypeId: stolen.deviceTypeId,
+                    stolenReportedAt: stolen.stolenReportedAt,
+                    matchedIdentifier: { type: i.type, value: i.rawValue }
+                });
+            }
+        }
+    }
+
+    let termsObject = null;
+    try {
+        termsObject = JSON.parse(terms);
+    } catch {
+        termsObject = null;
+    }
+
+    const transactionType = termsObject?.transactionType || null;
+    let sharedExchangeDevice = null;
+
+    if (transactionType === 'EXCHANGE' && sharedExchangeDeviceId) {
+        if (!isShopUser) {
+            throw new ApiError(403, 'Only shop users can use a granted exchange device');
+        }
+
+        const sharedAccess = await deviceRepository.findSharedDeviceForRecipient({
+            grantedToSellerId: effectiveSellerId,
+            deviceId: sharedExchangeDeviceId
+        });
+        if (!sharedAccess?.device) {
+            throw new ApiError(404, 'Shared exchange device not found');
+        }
+
+        sharedExchangeDevice = sharedAccess.device;
+        buyerEmail = sharedExchangeDevice.seller?.user?.email || buyerEmail;
+        buyerNationalId = sharedExchangeDevice.seller?.user?.nationalId || buyerNationalId;
+        buyerFullName = sharedExchangeDevice.seller?.user?.fullName || buyerFullName;
+        buyerLocation = formatSellerLocation(sharedExchangeDevice.seller) || buyerLocation;
+
+        if (!buyerEmail) {
+            throw new ApiError(422, 'The shared device owner must have an email address');
+        }
+
+        if (termsObject && typeof termsObject === 'object' && !Array.isArray(termsObject)) {
+            termsObject.client = {
+                ...(termsObject.client || {}),
+                fullName: buyerFullName,
+                email: buyerEmail,
+                nationalId: buyerNationalId || null,
+                location: buyerLocation || null
+            };
+
+            termsObject.exchange = {
+                ...(termsObject.exchange || {}),
+                clientPhone: {
+                    fields: mapDeviceFieldValues(sharedExchangeDevice.fieldValues),
+                    sourceDeviceId: sharedExchangeDevice.id,
+                    sourceDeviceTitle: sharedExchangeDevice.title || null,
+                    sourceOwnerSellerId: sharedExchangeDevice.seller?.id || null,
+                    sourceOwnerName: sharedExchangeDevice.seller?.user?.fullName || null,
+                    images: sharedExchangeDevice.images || []
+                }
+            };
+            terms = JSON.stringify(termsObject, null, 2);
+        }
+    }
 
     if (!buyerEmail) {
         throw new ApiError(422, 'Buyer email is required');
     }
-
-    // buyerEmail is required.
-
-    const device = await deviceRepository.findDeviceById(deviceId);
-    if (!device) throw new ApiError(404, 'Device not found');
-    if (device.sellerId !== sellerId) throw new ApiError(403, 'You can only create agreements for your own devices');
 
     let buyerUser = null;
     let clientAuth = null;
@@ -139,21 +333,12 @@ async function createAgreement({
     buyerUser = buyerByEmail || buyerByNid;
 
     if (!buyerUser) {
-        const createdBuyer = await createWalkInBuyer({ buyerEmail, buyerNationalId, buyerFullName });
+        const createdBuyer = await createEmailBuyerWithTempPassword({ buyerEmail, buyerNationalId, buyerFullName });
         buyerUser = createdBuyer.buyerUser;
         clientAuth = createdBuyer.clientAuth;
     }
 
-    const buyerRoleNames = Array.isArray(buyerUser.roles)
-        ? (typeof buyerUser.roles[0] === 'string'
-            ? buyerUser.roles
-            : buyerUser.roles.map((ur) => ur.role.name))
-        : [];
-
-    if (!buyerRoleNames.includes('BUYER')) {
-        await authRepository.assignRole(buyerUser.id, 'BUYER');
-    }
-
+    // User type is set when created; no need to assign roles
     const buyerId = buyerUser.buyerId || buyerUser.buyer?.id || null;
     const buyerProfile = buyerId ? { id: buyerId } : await authRepository.createBuyerProfile(buyerUser.id);
 
@@ -176,7 +361,7 @@ async function createAgreement({
 
     const agreement = await agreementRepository.createAgreement({
         deviceId,
-        sellerId,
+        sellerId: effectiveSellerId,
         buyerId: buyerProfile.id,
         price: String(price),
         currency,
@@ -338,7 +523,24 @@ async function confirmAgreement({ buyerId, agreementId }) {
     }
 
     if (transactionType !== 'BUY') {
-        await agreementRepository.setDeviceSold(device.id);
+        if (transactionType === 'EXCHANGE') {
+            const termsObj = safeJsonParse(accepted.terms);
+            const sharedDeviceId = termsObj?.exchange?.clientPhone?.sourceDeviceId || null;
+            const sharedOwnerSellerId = termsObj?.exchange?.clientPhone?.sourceOwnerSellerId || null;
+
+            if (sharedDeviceId && sharedOwnerSellerId) {
+                await deviceRepository.swapDeviceOwnersForExchange({
+                    shopDeviceId: device.id,
+                    sharedDeviceId,
+                    shopSellerId: agreement.sellerId,
+                    individualSellerId: sharedOwnerSellerId
+                });
+            } else {
+                await agreementRepository.setDeviceSold(device.id);
+            }
+        } else {
+            await agreementRepository.setDeviceSold(device.id);
+        }
     }
 
     return accepted;
@@ -358,11 +560,11 @@ async function getAgreementForDocument({ agreementId }) {
     };
 }
 
-async function getAgreementById({ agreementId, userId, roles }) {
+async function getAgreementById({ agreementId, userId, userType }) {
     const agreement = await agreementRepository.findAgreementById(agreementId);
     if (!agreement) throw new ApiError(404, 'Agreement not found');
 
-    const isAdmin = (roles || []).includes('ADMIN');
+    const isAdmin = userType === 'ADMIN';
     const isSeller = agreement.seller?.user?.id && agreement.seller.user.id === userId;
     const isBuyer = agreement.buyer?.user?.id && agreement.buyer.user.id === userId;
     if (!isAdmin && !isSeller && !isBuyer) throw new ApiError(403, 'Forbidden');
@@ -376,21 +578,6 @@ async function getAgreementById({ agreementId, userId, roles }) {
     };
 }
 
-async function deleteAgreement({ sellerId, agreementId }) {
-    if (!sellerId) throw new ApiError(403, 'Seller profile required');
-
-    const agreement = await agreementRepository.findAgreementById(agreementId);
-    if (!agreement) throw new ApiError(404, 'Agreement not found');
-
-    if (agreement.sellerId !== sellerId) throw new ApiError(403, 'You can only cancel your own agreements');
-    if (agreement.status !== 'PENDING') throw new ApiError(409, 'Only pending agreements can be canceled');
-
-    await agreementRepository.deleteAgreement(agreementId);
-    return { success: true };
-}
-
-
-
 module.exports = {
     createAgreement,
     confirmAgreement,
@@ -403,13 +590,26 @@ module.exports = {
     confirmAgreementByApprovalToken
 };
 
-async function listSoldAgreements({ sellerId, limit, skip }) {
-    if (!sellerId) throw new ApiError(403, 'Seller profile required');
-    return agreementRepository.listAgreementsAsSeller(sellerId, { limit, skip });
+async function listSoldAgreements({ userId, sellerId, limit, skip }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+    return agreementRepository.listAgreementsAsSeller(sellerContext.sellerId, { limit, skip });
 }
 
 async function listBoughtAgreements({ buyerId, limit, skip }) {
     if (!buyerId) throw new ApiError(403, 'Buyer profile required');
     return agreementRepository.listAgreementsAsBuyer(buyerId, { limit, skip });
+}
+
+async function deleteAgreement({ userId, sellerId, agreementId }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+
+    const agreement = await agreementRepository.findAgreementById(agreementId);
+    if (!agreement) throw new ApiError(404, 'Agreement not found');
+
+    if (agreement.sellerId !== sellerContext.sellerId) throw new ApiError(403, 'You can only cancel your own agreements');
+    if (agreement.status !== 'PENDING') throw new ApiError(409, 'Only pending agreements can be canceled');
+
+    await agreementRepository.deleteAgreement(agreementId);
+    return { success: true };
 }
 

@@ -19,6 +19,24 @@ const getDeviceSchema = z.object({
     query: z.object({}).default({})
 });
 
+const grantDeviceExchangeAccessSchema = z.object({
+    body: z.object({
+        grantedToSellerId: z.string().min(1)
+    }),
+    params: z.object({
+        id: z.string().min(1)
+    }),
+    query: z.object({}).default({})
+});
+
+const revokeDeviceExchangeAccessSchema = z.object({
+    body: z.object({}).default({}),
+    params: z.object({
+        id: z.string().min(1)
+    }),
+    query: z.object({}).default({})
+});
+
 const listDevicesSchema = z.object({
     body: z.object({}).default({}),
     params: z.object({}).default({}),
@@ -32,5 +50,7 @@ const listDevicesSchema = z.object({
 module.exports = {
     createDeviceSchema,
     getDeviceSchema,
+    grantDeviceExchangeAccessSchema,
+    revokeDeviceExchangeAccessSchema,
     listDevicesSchema
 };
