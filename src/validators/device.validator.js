@@ -3,11 +3,29 @@ const { z } = require('zod');
 const createDeviceSchema = z.object({
     body: z.object({
         deviceTypeId: z.string().min(1),
-        title: z.string().optional(),
+        title: z.string().min(2, 'Title is required'),
         // For multipart requests this comes in as a string; service will JSON.parse it
         fields: z.string().optional()
     }),
     params: z.object({}).default({}),
+    query: z.object({}).default({})
+});
+
+const updateDeviceSchema = z.object({
+    body: z.object({
+        title: z.string().min(2, 'Title is required')
+    }),
+    params: z.object({
+        id: z.string().min(1)
+    }),
+    query: z.object({}).default({})
+});
+
+const deleteDeviceSchema = z.object({
+    body: z.object({}).default({}),
+    params: z.object({
+        id: z.string().min(1)
+    }),
     query: z.object({}).default({})
 });
 
@@ -49,6 +67,8 @@ const listDevicesSchema = z.object({
 
 module.exports = {
     createDeviceSchema,
+    updateDeviceSchema,
+    deleteDeviceSchema,
     getDeviceSchema,
     grantDeviceExchangeAccessSchema,
     revokeDeviceExchangeAccessSchema,

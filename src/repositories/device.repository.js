@@ -48,6 +48,32 @@ async function createDeviceWithValues({ sellerId, deviceTypeId, title, values })
     });
 }
 
+async function updateDeviceTitleBySeller({ deviceId, title }) {
+    return prisma.device.update({
+        where: { id: deviceId },
+        data: { title },
+        select: {
+            id: true,
+            title: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            deviceType: {
+                select: {
+                    id: true,
+                    name: true
+                }
+            }
+        }
+    });
+}
+
+async function deleteDeviceBySeller({ deviceId }) {
+    return prisma.device.delete({
+        where: { id: deviceId }
+    });
+}
+
 async function addDeviceImages(deviceId, images) {
     return prisma.deviceImage.createMany({
         data: images.map((img, index) => ({
@@ -324,7 +350,6 @@ async function listSharedDevicesForSeller(grantedToSellerId) {
                 status: 'ACTIVE'
             }
         },
-        orderBy: { updatedAt: 'desc' },
         select: {
             id: true,
             createdAt: true,
@@ -385,6 +410,15 @@ async function listSharedDevicesForSeller(grantedToSellerId) {
                                     email: true,
                                     nationalId: true,
                                     phone: true,
+                                    location: true,
+                                    province: true,
+                                    district: true,
+                                    sector: true,
+                                    cell: true,
+                                    village: true,
+                                    noticeableName: true,
+                                    houseName: true,
+                                    floor: true,
                                     type: true
                                 }
                             }
@@ -547,6 +581,8 @@ async function countActiveDevicesBySeller(sellerId) {
 module.exports = {
     findDeviceTypeWithFields,
     createDeviceWithValues,
+    updateDeviceTitleBySeller,
+    deleteDeviceBySeller,
     addDeviceImages,
     getDeviceForAgreement,
     findDeviceById,

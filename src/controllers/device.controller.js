@@ -46,6 +46,33 @@ async function getMyDevice(req, res, next) {
     }
 }
 
+async function updateMyDevice(req, res, next) {
+    try {
+        const device = await deviceService.updateSellerDevice({
+            userId: req.user.id,
+            sellerId: req.user.sellerId,
+            deviceId: req.params.id,
+            title: req.body.title
+        });
+        return ok(res, { message: 'Device updated', data: device });
+    } catch (err) {
+        return next(err);
+    }
+}
+
+async function deleteMyDevice(req, res, next) {
+    try {
+        const result = await deviceService.deleteSellerDevice({
+            userId: req.user.id,
+            sellerId: req.user.sellerId,
+            deviceId: req.params.id
+        });
+        return ok(res, { message: 'Device deleted', data: result });
+    } catch (err) {
+        return next(err);
+    }
+}
+
 async function grantExchangeAccess(req, res, next) {
     try {
         const result = await deviceService.grantDeviceExchangeAccess({
@@ -89,6 +116,8 @@ module.exports = {
     createDevice,
     listMyDevices,
     getMyDevice,
+    updateMyDevice,
+    deleteMyDevice,
     grantExchangeAccess,
     revokeExchangeAccess,
     listSharedExchangeDevices

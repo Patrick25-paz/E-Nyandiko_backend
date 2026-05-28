@@ -113,11 +113,12 @@ async function searchClients(userId, query) {
     const users = await sellerRepository.searchClients(seller.id, query.trim());
 
     return users.map(u => {
-        let photoUrl = null;
+        let photoUrl = u.profileImageUrl || null;
         let lastLocation = null;
+        const profileLocation = u.location || formatSellerLocationFromParts(u) || null;
 
         const latestAgreement = u.buyer?.agreementsAsBuyer?.[0];
-        if (latestAgreement && latestAgreement.terms) {
+        if (!photoUrl && latestAgreement && latestAgreement.terms) {
             try {
                 const termsObj = JSON.parse(latestAgreement.terms);
                 if (termsObj?.client?.photo?.url) {
@@ -138,8 +139,9 @@ async function searchClients(userId, query) {
             nationalId: u.nationalId,
             clientCode: u.clientCode,
             phone: u.phone,
+            profileImageUrl: u.profileImageUrl || null,
             photoUrl,
-            location: lastLocation
+            location: profileLocation || lastLocation
         };
     });
 }

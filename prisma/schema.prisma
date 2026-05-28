@@ -78,6 +78,18 @@ model User {
   resetPasswordToken   String?  @unique
   resetPasswordExpires DateTime?
   passwordExpiresAt    DateTime?
+  profileImageUrl      String?
+  profileImagePublicId String?
+  // Structured personal location fields for individual accounts.
+  location     String?
+  province     String?
+  district     String?
+  sector       String?
+  cell         String?
+  village      String?
+  noticeableName String?
+  houseName    String?
+  floor        String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

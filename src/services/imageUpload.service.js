@@ -32,6 +32,13 @@ async function uploadBuffer({ buffer, folder, filename }) {
     });
 }
 
+async function deleteByPublicId(publicId) {
+    if (!publicId) return null;
+    assertCloudinaryConfigured();
+    return cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
+}
+
 module.exports = {
-    uploadBuffer
+    uploadBuffer,
+    deleteByPublicId
 };

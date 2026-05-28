@@ -15,6 +15,7 @@
         "render:build": "npm run prisma:generate && npm run prisma:migrate:deploy",
         "prisma:studio": "prisma studio",
         "seed": "node prisma/seed.js",
+        "verify-admin": "node prisma/verifyAdmin.js",
         "user:type": "node scripts/update-user-type.js",
         "patch:seller-shop": "node scripts/update-user-type.js seller@enyandiko.com SHOP"
     },

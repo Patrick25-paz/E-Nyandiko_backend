@@ -10,15 +10,15 @@ function preprocessBoolean(value) {
 
 const createAgreementSchema = z.object({
     body: z.object({
-        deviceId: z.string().min(1),
-        sharedExchangeDeviceId: z.string().min(1).optional(),
-        buyerEmail: z.string().email(),
-        buyerNationalId: z.string().min(5).optional(),
-        buyerFullName: z.string().min(2),
-        buyerLocation: z.string().min(2),
-        price: z.union([z.string().min(1), z.number()]),
-        currency: z.string().min(3).max(5).optional().default('USD'),
-        terms: z.string().min(10),
+        deviceId: z.string().min(1, 'Device is required'),
+        sharedExchangeDeviceId: z.string().min(1, 'Shared exchange device is required').optional(),
+        buyerEmail: z.string().email('Enter a valid buyer email'),
+        buyerNationalId: z.string().min(5, 'Buyer national ID must be at least 5 characters').optional(),
+        buyerFullName: z.string().min(2, 'Buyer full name must be at least 2 characters'),
+        buyerLocation: z.string().min(2, 'Buyer location must be at least 2 characters'),
+        price: z.union([z.string().min(1, 'Price is required'), z.number()]),
+        currency: z.string().min(3, 'Currency is required').max(5).optional().default('USD'),
+        terms: z.string().min(10, 'Agreement terms are required'),
         sendEmail: z.preprocess(preprocessBoolean, z.boolean()).optional().default(false)
     }),
     params: z.object({}).default({}),

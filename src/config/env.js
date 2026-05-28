@@ -26,6 +26,12 @@ function normalizeDatabaseUrl(rawUrl) {
         params.set('pgbouncer', 'true');
     }
 
+    // Supabase pooler connections should use the pooler port, not the direct DB port.
+    // Keep the connection string consistent even if the env file was copied with 5432.
+    if (isSupabasePooler && (url.port === '' || url.port === '5432')) {
+        url.port = '6543';
+    }
+
     // Prisma pool defaults can be too low when the frontend triggers parallel requests.
     // Allow overriding via env vars, but ensure sane defaults.
     const desiredConnectionLimit = Number(process.env.PRISMA_CONNECTION_LIMIT || 5);

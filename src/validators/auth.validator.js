@@ -6,7 +6,8 @@ const registerSchema = z.object({
         phone: z.string().min(7),
         fullName: z.string().min(2),
         password: z.string().min(8),
-        businessName: z.string().optional()
+        businessName: z.string().optional(),
+        type: z.enum(['SHOP']).optional()
     }),
     params: z.object({}).default({}),
     query: z.object({}).default({})
@@ -17,7 +18,8 @@ const clientRegisterSchema = z.object({
         email: z.string().email(),
         phone: z.string().min(7),
         fullName: z.string().min(2),
-        password: z.string().min(8)
+        password: z.string().min(8),
+        type: z.enum(['INDIVIDUAL']).optional()
     }),
     params: z.object({}).default({}),
     query: z.object({}).default({})
@@ -75,6 +77,24 @@ const resendVerificationSchema = z.object({
     query: z.object({}).default({})
 });
 
+const updateMeSchema = z.object({
+    body: z.object({
+        fullName: z.string().min(2).max(120).optional(),
+        phone: z.string().min(7).max(20).optional(),
+        nationalId: z.string().min(5).max(30).optional(),
+        province: z.string().min(2).max(120).optional(),
+        district: z.string().min(2).max(120).optional(),
+        sector: z.string().min(2).max(120).optional(),
+        cell: z.string().min(2).max(120).optional(),
+        village: z.string().min(2).max(120).optional(),
+        noticeableName: z.string().max(120).optional(),
+        houseName: z.string().max(120).optional(),
+        floor: z.string().max(120).optional()
+    }),
+    params: z.object({}).default({}),
+    query: z.object({}).default({})
+});
+
 module.exports = {
     registerSchema,
     clientRegisterSchema,
@@ -83,5 +103,6 @@ module.exports = {
     verifyEmailSchema,
     forgotPasswordSchema,
     resetPasswordSchema,
-    resendVerificationSchema
+    resendVerificationSchema,
+    updateMeSchema
 };

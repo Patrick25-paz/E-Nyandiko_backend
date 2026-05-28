@@ -170,6 +170,53 @@ async function listSellerDevices({ userId, sellerId, limit, skip }) {
     return deviceRepository.listDevicesBySeller(sellerContext.sellerId, { limit, skip });
 }
 
+async function updateSellerDevice({ userId, sellerId, deviceId, title }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+
+    const device = await deviceRepository.findDeviceById(deviceId);
+    if (!device || device.sellerId !== sellerContext.sellerId) {
+        throw new ApiError(404, 'Device not found');
+    }
+
+    if (device.status === 'SOLD') {
+        throw new ApiError(409, 'Sold devices cannot be edited');
+    }
+
+    const normalizedTitle = typeof title === 'string' ? title.trim() : '';
+    if (normalizedTitle.length < 2) {
+        throw new ApiError(422, 'Title is required');
+    }
+
+    return deviceRepository.updateDeviceTitleBySeller({
+        deviceId,
+        title: normalizedTitle
+    });
+}
+
+async function deleteSellerDevice({ userId, sellerId, deviceId }) {
+    const sellerContext = await resolveSellerContext({ userId, sellerId });
+
+    const device = await deviceRepository.findDeviceById(deviceId);
+    if (!device || device.sellerId !== sellerContext.sellerId) {
+        throw new ApiError(404, 'Device not found');
+    }
+
+    if (device.status === 'SOLD') {
+        throw new ApiError(409, 'Sold devices cannot be deleted');
+    }
+
+    try {
+        await deviceRepository.deleteDeviceBySeller({ deviceId });
+    } catch (err) {
+        if (err?.code === 'P2003') {
+            throw new ApiError(409, 'This device cannot be deleted because it has related records or an agreement');
+        }
+        throw err;
+    }
+
+    return { deleted: true };
+}
+
 
 async function getSellerDevice({ userId, sellerId, deviceId }) {
     const sellerContext = await resolveSellerContext({ userId, sellerId });
@@ -277,6 +324,8 @@ async function listSharedExchangeDevices({ userId, sellerId }) {
 module.exports = {
     createDevice,
     listSellerDevices,
+    updateSellerDevice,
+    deleteSellerDevice,
     getSellerDevice,
     grantDeviceExchangeAccess,
     revokeDeviceExchangeAccess,

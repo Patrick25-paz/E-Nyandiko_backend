@@ -9,16 +9,19 @@ const env = require('../config/env');
 
 const PDF_STYLE = {
     colors: {
-        text: '#111827',
-        muted: '#6b7280',
-        border: '#e5e7eb',
-        brand: '#1d4ed8',
-        brandSoft: '#eff6ff',
-        successSoft: '#ecfdf5',
-        success: '#047857'
+        text: '#1a1a1a',
+        muted: '#666666',
+        border: '#d8d5cc',
+        surface: '#fafaf8',
+        surfaceAlt: '#f5f3ee',
+        navy: '#0f2444',
+        gold: '#c9a227',
+        goldSoft: '#f4ead0',
+        successSoft: '#eaf3de',
+        success: '#3b6d11'
     },
     sizes: {
-        h1: 18,
+        h1: 22,
         h2: 12,
         body: 10,
         small: 9
@@ -75,6 +78,19 @@ function drawPill(doc, x, y, text, { bg, fg } = {}) {
     return { w, h };
 }
 
+function drawWatermark(doc) {
+    doc.save();
+    doc.fillOpacity(0.04);
+    doc.font('Times-Bold').fontSize(72);
+    doc.rotate(-30, { origin: [doc.page.width / 2, doc.page.height / 2] });
+    doc.text('E-NYANDIKO', doc.page.width / 2 - 220, doc.page.height / 2 - 50, {
+        width: 440,
+        align: 'center'
+    });
+    doc.fillOpacity(1);
+    doc.restore();
+}
+
 function measurePill(doc, text) {
     const paddingX = 8;
     const paddingY = 4;
@@ -84,19 +100,29 @@ function measurePill(doc, text) {
     return { w, h };
 }
 
-function sectionTitle(doc, title) {
-    ensureSpace(doc, 28);
-    doc.moveDown(0.8);
-    doc
-        .font('Helvetica-Bold')
-        .fontSize(PDF_STYLE.sizes.h2)
-        .fillColor(PDF_STYLE.colors.text)
-        .text(title, doc.page.margins.left, doc.y, {
-            width: doc.page.width - doc.page.margins.left - doc.page.margins.right
-        });
-    doc.moveDown(0.35);
+function sectionTitle(doc, number, title) {
+    ensureSpace(doc, 34);
+    const startY = doc.y + 2;
+    const badgeSize = 22;
+    const x = doc.page.margins.left;
+    const textX = x + badgeSize + 10;
+
+    doc.save();
+    doc.circle(x + badgeSize / 2, startY + badgeSize / 2, badgeSize / 2).fillColor(PDF_STYLE.colors.navy).fill();
+    doc.fillColor(PDF_STYLE.colors.gold).font('Helvetica-Bold').fontSize(11).text(String(number), x, startY + 5, {
+        width: badgeSize,
+        align: 'center'
+    });
+    doc.restore();
+
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(PDF_STYLE.colors.navy).text(String(title).toUpperCase(), textX, startY + 3, {
+        width: doc.page.width - doc.page.margins.left - doc.page.margins.right - badgeSize - 10,
+        characterSpacing: 0.9
+    });
+
+    doc.moveDown(0.2);
     drawDivider(doc);
-    doc.moveDown(0.6);
+    doc.moveDown(0.45);
     doc.fillColor(PDF_STYLE.colors.text);
 }
 
@@ -276,6 +302,11 @@ function safeJsonParse(text) {
 
 async function createAgreement(req, res, next) {
     try {
+        const buyerImages = Array.isArray(req.files?.buyerImage) ? req.files.buyerImage : [];
+        if (buyerImages.length === 0) {
+            throw new ApiError(422, 'Client image is required');
+        }
+
         const result = await agreementService.createAgreement({
             userId: req.user.id,
             sellerId: req.user.sellerId,
@@ -440,50 +471,56 @@ async function document(req, res, next) {
             doc.on('error', reject);
 
             // Header
-            const headerTop = 40;
+            const headerTop = 34;
             const headerLeft = doc.page.margins.left;
             const headerRight = doc.page.width - doc.page.margins.right;
+            const headerWidth = headerRight - headerLeft;
+
+            doc.rect(0, 0, doc.page.width, 165).fill(PDF_STYLE.colors.navy);
+            doc.rect(0, 162, doc.page.width, 3).fill(PDF_STYLE.colors.gold);
 
             // Logo (read from frontend assets in this workspace)
             const logoPath = path.resolve(__dirname, '../../../frontend/src/images/E-Nyandiko.png');
             if (fs.existsSync(logoPath)) {
                 try {
-                    doc.image(logoPath, headerLeft, headerTop, { width: 58 });
+                    doc.image(logoPath, headerLeft, headerTop, { width: 38 });
                 } catch {
                     // ignore logo errors
                 }
             }
 
             doc
-                .font('Helvetica-Bold')
+                .font('Times-Bold')
                 .fontSize(PDF_STYLE.sizes.h1)
-                .fillColor(PDF_STYLE.colors.text)
-                .text('E-Nyandiko Agreement Document', headerLeft + 70, headerTop - 2, {
-                    width: headerRight - (headerLeft + 70),
+                .fillColor('#ffffff')
+                .text('Agreement Document', headerLeft + 60, headerTop - 2, {
+                    width: headerWidth - 60,
                     align: 'left'
                 });
 
             doc
                 .font('Helvetica')
                 .fontSize(PDF_STYLE.sizes.body)
-                .fillColor(PDF_STYLE.colors.muted)
-                .text(`Agreement ID: ${agreement.id}`, headerLeft + 70, headerTop + 22, {
-                    width: headerRight - (headerLeft + 70),
+                .fillOpacity(0.72)
+                .fillColor('#ffffff')
+                .text(`Agreement ID: ${agreement.id}`, headerLeft + 60, headerTop + 24, {
+                    width: headerWidth - 60,
                     align: 'left'
                 });
+            doc.fillOpacity(1);
 
             // Status pill (right-aligned)
             const statusText = `Status: ${agreement.status || '-'}`;
             const pillY = headerTop + 18;
             const pillX = headerRight - measurePill(doc, statusText).w;
             drawPill(doc, pillX, pillY, statusText, {
-                bg: agreement.status === 'ACCEPTED' ? PDF_STYLE.colors.successSoft : PDF_STYLE.colors.brandSoft,
-                fg: agreement.status === 'ACCEPTED' ? PDF_STYLE.colors.success : PDF_STYLE.colors.brand
+                bg: agreement.status === 'ACCEPTED' ? PDF_STYLE.colors.successSoft : PDF_STYLE.colors.goldSoft,
+                fg: agreement.status === 'ACCEPTED' ? PDF_STYLE.colors.success : '#854f0b'
             });
 
             // Reset cursor to normal flow after absolute-positioned header elements
             doc.x = headerLeft;
-            doc.y = headerTop + 65;
+            doc.y = 174;
             drawDivider(doc);
             doc.moveDown(1);
 
@@ -498,12 +535,14 @@ async function document(req, res, next) {
             doc.moveDown(0.6);
             doc.fillColor(PDF_STYLE.colors.text);
 
-            sectionTitle(doc, 'Parties');
+            drawWatermark(doc);
+
+            sectionTitle(doc, '1', 'Parties to the Agreement');
 
             const sellerUser = agreement.seller?.user;
             const buyerUser = agreement.buyer?.user;
 
-            doc.font('Helvetica-Bold').fontSize(PDF_STYLE.sizes.body).text('Seller');
+            doc.font('Helvetica-Bold').fontSize(PDF_STYLE.sizes.body).text('Seller / Vendor');
             doc.moveDown(0.3);
             renderKeyValueTwoCol(doc, [
                 { label: 'Business name', value: agreement.seller?.businessName },
@@ -520,7 +559,7 @@ async function document(req, res, next) {
             }
             doc.moveDown(0.3);
 
-            doc.font('Helvetica-Bold').fontSize(PDF_STYLE.sizes.body).text('Buyer');
+            doc.font('Helvetica-Bold').fontSize(PDF_STYLE.sizes.body).text('Buyer / Client');
             doc.moveDown(0.3);
             renderKeyValueTwoCol(doc, [
                 { label: 'Full name', value: buyerUser?.fullName },
@@ -534,7 +573,7 @@ async function document(req, res, next) {
             }
             doc.moveDown(1);
 
-            sectionTitle(doc, 'Device');
+            sectionTitle(doc, '2', 'Device Information');
             renderKeyValueTwoCol(doc, [
                 { label: 'Type', value: device?.deviceType?.name },
                 { label: 'Title', value: device?.title },
@@ -543,7 +582,7 @@ async function document(req, res, next) {
 
             if (device?.fieldValues && Array.isArray(device.fieldValues) && device.fieldValues.length > 0) {
                 doc.moveDown(0.4);
-                doc.font('Helvetica-Bold').fontSize(PDF_STYLE.sizes.body).text('Device details');
+                    doc.font('Helvetica-Bold').fontSize(PDF_STYLE.sizes.body).text('Device Details');
                 doc.font('Helvetica').fontSize(PDF_STYLE.sizes.body).fillColor(PDF_STYLE.colors.text);
                 for (const fv of device.fieldValues) {
                     const key = fv.deviceField?.label || fv.deviceField?.key || 'Field';
@@ -562,7 +601,7 @@ async function document(req, res, next) {
             }
 
             doc.moveDown(1);
-            sectionTitle(doc, 'Agreement');
+            sectionTitle(doc, '3', 'Financial Terms');
             renderKeyValueTwoCol(doc, [
                 { label: 'Price', value: `${agreement.price} ${agreement.currency}` },
                 { label: 'Created', value: agreement.createdAt ? new Date(agreement.createdAt).toLocaleString() : '-' },
@@ -572,7 +611,7 @@ async function document(req, res, next) {
             doc.moveDown(0.4);
 
             if (termsObj) {
-                sectionTitle(doc, 'Terms & Conditions');
+                sectionTitle(doc, '4', 'Terms & Conditions');
                 doc.font('Helvetica').fontSize(PDF_STYLE.sizes.body).fillColor(PDF_STYLE.colors.text);
 
                 const tx = termsObj.transactionType || '-';
@@ -614,9 +653,40 @@ async function document(req, res, next) {
                     addImageGrid(doc, 'Trade-in device photos', exchangeBufs);
                 }
             } else {
-                sectionTitle(doc, 'Terms');
+                sectionTitle(doc, '4', 'Terms & Conditions');
                 doc.font('Helvetica').fontSize(PDF_STYLE.sizes.body).text(String(agreement.terms || '-'));
             }
+
+            doc.moveDown(1);
+            sectionTitle(doc, '5', 'Signatures & Acknowledgement');
+            const sigStartY = doc.y + 10;
+            const sigColWidth = (doc.page.width - doc.page.margins.left - doc.page.margins.right - 32) / 2;
+            const leftSigX = doc.page.margins.left;
+            const rightSigX = leftSigX + sigColWidth + 32;
+
+            function drawSignatureBlock(x, name, role) {
+                const baseY = sigStartY;
+                doc.save();
+                doc.dash(4, { space: 3 }).moveTo(x, baseY + 34).lineTo(x + sigColWidth, baseY + 34).strokeColor('#9ca3af').stroke();
+                doc.undash();
+                doc.fillColor(PDF_STYLE.colors.text).font('Helvetica-Bold').fontSize(12).text(name || '-', x, baseY + 44, { width: sigColWidth });
+                doc.font('Helvetica').fontSize(10).fillColor(PDF_STYLE.colors.muted).text(role, x, baseY + 60, { width: sigColWidth });
+                doc.font('Helvetica').fontSize(10).fillColor(PDF_STYLE.colors.muted).text('Date: _______________', x, baseY + 80, { width: sigColWidth });
+                doc.restore();
+            }
+
+            drawSignatureBlock(leftSigX, agreement.seller?.businessName || sellerUser?.fullName, 'Seller / Authorized Representative');
+            drawSignatureBlock(rightSigX, buyerUser?.fullName, 'Buyer / Client');
+
+            doc.moveDown(5.5);
+
+            doc.save();
+            doc.circle(rightSigX + sigColWidth - 36, sigStartY + 70, 32).lineWidth(1.5).strokeColor('#d1d5db').stroke();
+            doc.font('Helvetica-Bold').fontSize(8).fillColor('#c7cdd6').text('Official\nStamp', rightSigX + sigColWidth - 60, sigStartY + 58, {
+                width: 48,
+                align: 'center'
+            });
+            doc.restore();
 
             doc.moveDown(2);
             drawDivider(doc);
@@ -625,7 +695,7 @@ async function document(req, res, next) {
                 .fontSize(PDF_STYLE.sizes.small)
                 .font('Helvetica')
                 .fillColor(PDF_STYLE.colors.muted)
-                .text('This document was generated by E-Nyandiko.', { align: 'center' });
+                .text('This is a legally binding agreement between the parties identified above. Generated by the E-Nyandiko platform. Any disputes shall be resolved under applicable commercial law.', { align: 'center' });
             doc.fillColor(PDF_STYLE.colors.text);
 
             doc.end();
