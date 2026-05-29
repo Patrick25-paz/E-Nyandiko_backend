@@ -9,6 +9,7 @@
     "scripts": {
         "dev": "nodemon --signal SIGTERM --delay 1000ms src/server.js",
         "start": "node src/server.js",
+        "build": "npm run render:build",
         "prisma:generate": "prisma generate",
         "prisma:migrate": "prisma migrate dev",
         "prisma:migrate:deploy": "prisma migrate deploy",
