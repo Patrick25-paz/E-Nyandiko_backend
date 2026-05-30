@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    margin: 0;
+    background: #ffffff;
+    color: #1f2937;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+  }
+}
