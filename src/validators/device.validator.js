@@ -13,7 +13,8 @@ const createDeviceSchema = z.object({
 
 const updateDeviceSchema = z.object({
     body: z.object({
-        title: z.string().min(2, 'Title is required')
+        title: z.string().min(2, 'Title is required'),
+        fields: z.string().optional()
     }),
     params: z.object({
         id: z.string().min(1)

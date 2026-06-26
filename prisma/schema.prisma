@@ -101,6 +101,7 @@ model User {
 
   @@index([email])
   @@index([createdAt])
+  @@index([type])
 }
 
 
@@ -196,6 +197,7 @@ model SellerSubscription {
   @@index([status])
   @@index([startAt])
   @@index([endAt])
+  @@index([status, endAt])
 }
 
 model Buyer {
@@ -281,6 +283,21 @@ model DeviceExchangeAccess {
   @@index([ownerSellerId])
   @@index([grantedToSellerId])
 }
+
+model DeviceExchangeAccessHistory {
+  id                String   @id @default(cuid())
+  deviceId          String
+  ownerSellerId     String
+  grantedToSellerId String
+  deviceTypeId      String
+  createdAt         DateTime @default(now())
+
+  @@index([ownerSellerId])
+  @@index([deviceId])
+  @@index([deviceTypeId])
+  @@index([createdAt])
+}
+
 
 model DeviceFieldValue {
   id            String   @id @default(cuid())

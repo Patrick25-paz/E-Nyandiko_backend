@@ -57,7 +57,8 @@ const getAgreementDocumentSchema = z.object({
         id: z.string().min(1)
     }),
     query: z.object({
-        token: z.string().min(10).optional()
+        token: z.string().min(10).optional(),
+        download: z.string().optional()
     }).default({})
 });
 

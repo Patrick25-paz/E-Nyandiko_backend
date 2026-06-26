@@ -10,7 +10,14 @@ const { createDeviceSchema, deleteDeviceSchema, getDeviceSchema, grantDeviceExch
 router.get('/', auth, requireType('SHOP', 'INDIVIDUAL'), validate(listDevicesSchema), deviceController.listMyDevices);
 router.get('/shared/exchange-access', auth, requireType('SHOP'), deviceController.listSharedExchangeDevices);
 router.get('/:id', auth, requireType('SHOP', 'INDIVIDUAL'), validate(getDeviceSchema), deviceController.getMyDevice);
-router.patch('/:id', auth, requireType('SHOP', 'INDIVIDUAL'), validate(updateDeviceSchema), deviceController.updateMyDevice);
+router.patch(
+    '/:id',
+    auth,
+    requireType('SHOP', 'INDIVIDUAL'),
+    upload.array('images', 5),
+    validate(updateDeviceSchema),
+    deviceController.updateMyDevice
+);
 router.delete('/:id', auth, requireType('SHOP', 'INDIVIDUAL'), validate(deleteDeviceSchema), deviceController.deleteMyDevice);
 router.post('/:id/exchange-access', auth, requireType('INDIVIDUAL'), validate(grantDeviceExchangeAccessSchema), deviceController.grantExchangeAccess);
 router.delete('/:id/exchange-access', auth, requireType('INDIVIDUAL'), validate(revokeDeviceExchangeAccessSchema), deviceController.revokeExchangeAccess);

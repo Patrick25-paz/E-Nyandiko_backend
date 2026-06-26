@@ -352,11 +352,16 @@ async function rejectClaim({ claimId, reviewedByUserId }) {
     });
 }
 
-async function listSubscriptionsInRange({ startInclusive, endExclusive }) {
+async function listSubscriptionsInRange({ startInclusive, endExclusive }, options = {}) {
+    const limit = Math.min(Number(options.limit) || 200, 500);
+    const skip = Math.max(Number(options.skip) || 0, 0);
+
     return prisma.sellerSubscription.findMany({
         where: {
             startAt: { gte: startInclusive, lt: endExclusive }
         },
+        take: limit,
+        skip: skip,
         select: {
             id: true,
             sellerId: true,

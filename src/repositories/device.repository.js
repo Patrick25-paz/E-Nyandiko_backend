@@ -68,6 +68,50 @@ async function updateDeviceTitleBySeller({ deviceId, title }) {
     });
 }
 
+async function updateDeviceWithValues({ deviceId, title, values }) {
+    return prisma.$transaction(async (tx) => {
+        const device = await tx.device.update({
+            where: { id: deviceId },
+            data: { title },
+            select: {
+                id: true,
+                title: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+                deviceType: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
+                }
+            }
+        });
+
+        await tx.deviceFieldValue.deleteMany({
+            where: { deviceId }
+        });
+
+        if (values.length > 0) {
+            await tx.deviceFieldValue.createMany({
+                data: values.map((v) => ({
+                    deviceId,
+                    deviceFieldId: v.deviceFieldId,
+                    value: v.value
+                }))
+            });
+        }
+
+        return device;
+    });
+}
+
+async function deleteDeviceImages(deviceId) {
+    return prisma.deviceImage.deleteMany({
+        where: { deviceId }
+    });
+}
+
 async function deleteDeviceBySeller({ deviceId }) {
     return prisma.device.delete({
         where: { id: deviceId }
@@ -186,6 +230,12 @@ async function listDevicesBySeller(sellerId, options = {}) {
                     name: true
                 }
             },
+            images: {
+                orderBy: { sortOrder: 'asc' },
+                select: {
+                    url: true
+                }
+            },
             // Optimization: fetch only the latest accepted or pending agreement
             agreements: {
                 where: { status: { in: ['ACCEPTED', 'PENDING'] } },
@@ -196,6 +246,23 @@ async function listDevicesBySeller(sellerId, options = {}) {
                     status: true,
                     acceptedAt: true,
                     createdAt: true
+                }
+            },
+            exchangeAccess: {
+                select: {
+                    id: true,
+                    grantedToSellerId: true,
+                    grantedToSeller: {
+                        select: {
+                            id: true,
+                            businessName: true,
+                            user: {
+                                select: {
+                                    fullName: true
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -208,17 +275,36 @@ async function listDevicesBySeller(sellerId, options = {}) {
 
 async function findDeviceDetailForSeller({ sellerId, deviceId }) {
     const device = await prisma.device.findFirst({
-        where: { id: deviceId, sellerId },
+        where: {
+            id: deviceId,
+            OR: [
+                { sellerId },
+                { exchangeAccess: { grantedToSellerId: sellerId } }
+            ]
+        },
         // Optimization: fetch only fields rendered by SellerDeviceDetailPage.
         select: {
             id: true,
+            sellerId: true,
             title: true,
             status: true,
             createdAt: true,
             deviceType: {
                 select: {
                     id: true,
-                    name: true
+                    name: true,
+                    fields: {
+                        orderBy: { sortOrder: 'asc' },
+                        select: {
+                            id: true,
+                            key: true,
+                            label: true,
+                            dataType: true,
+                            required: true,
+                            options: true,
+                            sortOrder: true
+                        }
+                    }
                 }
             },
             fieldValues: {
@@ -342,7 +428,10 @@ async function upsertDeviceExchangeAccess({ deviceId, ownerSellerId, grantedToSe
     });
 }
 
-async function listSharedDevicesForSeller(grantedToSellerId) {
+async function listSharedDevicesForSeller(grantedToSellerId, options = {}) {
+    const limit = Math.min(Number(options.limit) || 20, 100);
+    const skip = Math.max(Number(options.skip) || 0, 0);
+
     return prisma.deviceExchangeAccess.findMany({
         where: {
             grantedToSellerId,
@@ -350,6 +439,8 @@ async function listSharedDevicesForSeller(grantedToSellerId) {
                 status: 'ACTIVE'
             }
         },
+        take: limit,
+        skip: skip,
         select: {
             id: true,
             createdAt: true,
@@ -419,6 +510,7 @@ async function listSharedDevicesForSeller(grantedToSellerId) {
                                     noticeableName: true,
                                     houseName: true,
                                     floor: true,
+                                    profileImageUrl: true,
                                     type: true
                                 }
                             }
@@ -500,6 +592,16 @@ async function findSharedDeviceForRecipient({ grantedToSellerId, deviceId }) {
                                     email: true,
                                     nationalId: true,
                                     phone: true,
+                                    location: true,
+                                    province: true,
+                                    district: true,
+                                    sector: true,
+                                    cell: true,
+                                    village: true,
+                                    noticeableName: true,
+                                    houseName: true,
+                                    floor: true,
+                                    profileImageUrl: true,
                                     type: true
                                 }
                             }
@@ -577,11 +679,72 @@ async function countActiveDevicesBySeller(sellerId) {
     });
 }
 
+async function countActiveDevicesBySellerAndType(sellerId, deviceTypeId) {
+    return prisma.device.count({
+        where: {
+            sellerId,
+            deviceTypeId,
+            status: 'ACTIVE'
+        }
+    });
+}
+
+async function countGrantsForSellerAndTypeInPeriod(ownerSellerId, deviceTypeId, periodMs) {
+    const since = new Date(Date.now() - periodMs);
+    return prisma.deviceExchangeAccessHistory.count({
+        where: {
+            ownerSellerId,
+            deviceTypeId,
+            createdAt: { gte: since }
+        }
+    });
+}
+
+async function countGrantsForDeviceInPeriod(deviceId, periodMs) {
+    const since = new Date(Date.now() - periodMs);
+    return prisma.deviceExchangeAccessHistory.count({
+        where: {
+            deviceId,
+            createdAt: { gte: since }
+        }
+    });
+}
+
+async function createDeviceExchangeAccessHistory({ deviceId, ownerSellerId, grantedToSellerId, deviceTypeId }) {
+    return prisma.deviceExchangeAccessHistory.create({
+        data: {
+            deviceId,
+            ownerSellerId,
+            grantedToSellerId,
+            deviceTypeId
+        }
+    });
+}
+
+
+async function transferDeviceOwnership({ deviceId, newSellerId }) {
+    return prisma.$transaction(async (tx) => {
+        await tx.device.update({
+            where: { id: deviceId },
+            data: {
+                sellerId: newSellerId,
+                status: 'ACTIVE'
+            }
+        });
+
+        await tx.deviceExchangeAccess.deleteMany({
+            where: { deviceId }
+        });
+    });
+}
+
 
 module.exports = {
     findDeviceTypeWithFields,
     createDeviceWithValues,
     updateDeviceTitleBySeller,
+    updateDeviceWithValues,
+    deleteDeviceImages,
     deleteDeviceBySeller,
     addDeviceImages,
     getDeviceForAgreement,
@@ -595,6 +758,12 @@ module.exports = {
     deleteExchangeAccessByDeviceId,
     swapDeviceOwnersForExchange,
     getStatsForSeller,
-    countActiveDevicesBySeller
+    countActiveDevicesBySeller,
+    countActiveDevicesBySellerAndType,
+    countGrantsForSellerAndTypeInPeriod,
+    countGrantsForDeviceInPeriod,
+    createDeviceExchangeAccessHistory,
+    transferDeviceOwnership
 };
+
 

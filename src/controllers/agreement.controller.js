@@ -122,14 +122,14 @@ async function document(req, res, next) {
         if (!isAdmin && !isSeller && !isBuyer) throw new ApiError(403, 'Forbidden');
 
         const pdfBuffer = await renderAgreementPdf(agreement);
+        const buffer = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
 
         // ── Send response ────────────────────────────────────────────────────
         res.setHeader('Content-Type', 'application/pdf');
         const dl = String(req.query?.download || '').toLowerCase();
         const isDownload = dl === '1' || dl === 'true' || dl === 'yes';
         res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="agreement-${agreement.id}.pdf"`);
-        res.setHeader('Content-Length', pdfBuffer.length);
-        res.end(pdfBuffer);
+        return res.send(buffer);
 
     } catch (err) { return next(err); }
 }

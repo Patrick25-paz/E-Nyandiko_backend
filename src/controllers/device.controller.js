@@ -52,7 +52,9 @@ async function updateMyDevice(req, res, next) {
             userId: req.user.id,
             sellerId: req.user.sellerId,
             deviceId: req.params.id,
-            title: req.body.title
+            title: req.body.title,
+            fieldsRaw: req.body.fields,
+            files: req.files
         });
         return ok(res, { message: 'Device updated', data: device });
     } catch (err) {
@@ -104,7 +106,9 @@ async function listSharedExchangeDevices(req, res, next) {
     try {
         const devices = await deviceService.listSharedExchangeDevices({
             userId: req.user.id,
-            sellerId: req.user.sellerId
+            sellerId: req.user.sellerId,
+            limit: req.query.limit,
+            skip: req.query.skip
         });
         return ok(res, { message: 'Shared exchange devices', data: devices });
     } catch (err) {

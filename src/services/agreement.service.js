@@ -225,9 +225,31 @@ async function createAgreement({
     const effectiveSellerId = sellerContext.sellerId;
     const isShopUser = sellerContext.user.type === 'SHOP';
 
+    let termsObject = null;
+    try {
+        termsObject = typeof terms === 'string' ? JSON.parse(terms) : terms;
+    } catch {
+        termsObject = null;
+    }
+
+    const transactionType = termsObject?.transactionType || null;
+
     const device = await deviceRepository.findDeviceById(deviceId);
     if (!device) throw new ApiError(404, 'Device not found');
-    if (device.sellerId !== effectiveSellerId) throw new ApiError(403, 'You can only create agreements for your own devices');
+
+    if (device.sellerId !== effectiveSellerId) {
+        if (transactionType === 'BUY') {
+            const sharedAccess = await deviceRepository.findSharedDeviceForRecipient({
+                grantedToSellerId: effectiveSellerId,
+                deviceId
+            });
+            if (!sharedAccess) {
+                throw new ApiError(403, 'You do not have access to buy this device');
+            }
+        } else {
+            throw new ApiError(403, 'You can only create agreements for your own devices');
+        }
+    }
 
     // Stolen check: only works when the device type defines identifier field keys (e.g. "imei", "serialNumber").
     const deviceForCheck = await deviceRepository.getDeviceFieldsForStolenCheck(deviceId);
@@ -260,14 +282,7 @@ async function createAgreement({
         }
     }
 
-    let termsObject = null;
-    try {
-        termsObject = JSON.parse(terms);
-    } catch {
-        termsObject = null;
-    }
-
-    const transactionType = termsObject?.transactionType || null;
+    const termsMutable = termsObject && typeof termsObject === 'object' && !Array.isArray(termsObject) ? { ...termsObject } : null;
     let sharedExchangeDevice = null;
 
     if (transactionType === 'EXCHANGE' && sharedExchangeDeviceId) {
@@ -287,23 +302,23 @@ async function createAgreement({
         buyerEmail = sharedExchangeDevice.seller?.user?.email || buyerEmail;
         buyerNationalId = sharedExchangeDevice.seller?.user?.nationalId || buyerNationalId;
         buyerFullName = sharedExchangeDevice.seller?.user?.fullName || buyerFullName;
-        buyerLocation = formatSellerLocation(sharedExchangeDevice.seller) || buyerLocation;
+        buyerLocation = formatSellerLocation(sharedExchangeDevice.seller) || formatSellerLocation(sharedExchangeDevice.seller?.user) || buyerLocation;
 
         if (!buyerEmail) {
             throw new ApiError(422, 'The shared device owner must have an email address');
         }
 
-        if (termsObject && typeof termsObject === 'object' && !Array.isArray(termsObject)) {
-            termsObject.client = {
-                ...(termsObject.client || {}),
+        if (termsMutable) {
+            termsMutable.client = {
+                ...(termsMutable.client || {}),
                 fullName: buyerFullName,
                 email: buyerEmail,
                 nationalId: buyerNationalId || null,
                 location: buyerLocation || null
             };
 
-            termsObject.exchange = {
-                ...(termsObject.exchange || {}),
+            termsMutable.exchange = {
+                ...(termsMutable.exchange || {}),
                 clientPhone: {
                     fields: mapDeviceFieldValues(sharedExchangeDevice.fieldValues),
                     sourceDeviceId: sharedExchangeDevice.id,
@@ -313,7 +328,6 @@ async function createAgreement({
                     images: sharedExchangeDevice.images || []
                 }
             };
-            terms = JSON.stringify(termsObject, null, 2);
         }
     }
 
@@ -344,20 +358,14 @@ async function createAgreement({
 
     // Store the provided client profile details inside the terms as well (for reporting), but don't force a specific format.
     // If terms is JSON, the frontend can already include these; this is just a minimal append for safety.
-    if (buyerFullName || buyerLocation || buyerNationalId) {
-        try {
-            const parsed = JSON.parse(terms);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                parsed.client = parsed.client || {};
-                parsed.client.fullName = parsed.client.fullName || buyerFullName;
-                parsed.client.location = parsed.client.location || buyerLocation;
-                parsed.client.nationalId = parsed.client.nationalId || buyerNationalId;
-                terms = JSON.stringify(parsed, null, 2);
-            }
-        } catch {
-            // non-JSON terms: leave as-is
-        }
+    if ((buyerFullName || buyerLocation || buyerNationalId) && termsMutable) {
+        termsMutable.client = termsMutable.client || {};
+        termsMutable.client.fullName = termsMutable.client.fullName || buyerFullName;
+        termsMutable.client.location = termsMutable.client.location || buyerLocation;
+        termsMutable.client.nationalId = termsMutable.client.nationalId || buyerNationalId;
     }
+
+    const finalTerms = termsMutable && termsObject ? JSON.stringify(termsMutable, null, 2) : terms;
 
     const agreement = await agreementRepository.createAgreement({
         deviceId,
@@ -365,7 +373,7 @@ async function createAgreement({
         buyerId: buyerProfile.id,
         price: String(price),
         currency,
-        terms,
+        terms: finalTerms,
         status: 'PENDING',
         isImmutable: false
     });
@@ -376,23 +384,22 @@ async function createAgreement({
     if (exchangeImageFiles && exchangeImageFiles.length > 0) {
         const folder = `${env.CLOUDINARY_FOLDER}/agreements/${agreement.id}/client_device`;
 
-        const uploaded = [];
-        for (const file of exchangeImageFiles) {
-            const result = await uploadBuffer({
-                buffer: file.buffer,
-                folder,
-                filename: file.originalname.replace(/\.[^.]+$/, '')
-            });
-
-            uploaded.push({
-                url: result.secure_url,
-                publicId: result.public_id,
-                bytes: result.bytes,
-                width: result.width,
-                height: result.height,
-                format: result.format
-            });
-        }
+        const uploaded = await Promise.all(
+            exchangeImageFiles.map((file) =>
+                uploadBuffer({
+                    buffer: file.buffer,
+                    folder,
+                    filename: file.originalname.replace(/\.[^.]+$/, '')
+                }).then((result) => ({
+                    url: result.secure_url,
+                    publicId: result.public_id,
+                    bytes: result.bytes,
+                    width: result.width,
+                    height: result.height,
+                    format: result.format
+                }))
+            )
+        );
 
         try {
             const termsObj = JSON.parse(agreement.terms);
@@ -522,7 +529,14 @@ async function confirmAgreement({ buyerId, agreementId }) {
         transactionType = null;
     }
 
-    if (transactionType !== 'BUY') {
+    if (transactionType === 'BUY') {
+        if (device.sellerId !== agreement.sellerId) {
+            await deviceRepository.transferDeviceOwnership({
+                deviceId: device.id,
+                newSellerId: agreement.sellerId
+            });
+        }
+    } else {
         if (transactionType === 'EXCHANGE') {
             const termsObj = safeJsonParse(accepted.terms);
             const sharedDeviceId = termsObj?.exchange?.clientPhone?.sourceDeviceId || null;

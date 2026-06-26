@@ -95,8 +95,37 @@ async function upsertIdentityWithIdentifiers({ deviceTypeId, identifiers }) {
                 }
             });
 
-        for (const i of identifiers) {
-            await tx.deviceIdentifier.upsert({
+        // Batch insert new identifiers; existing ones are updated individually.
+        const existingIdentifiers = await tx.deviceIdentifier.findMany({
+            where: {
+                deviceTypeId,
+                OR: identifiers.map((i) => ({
+                    type: i.type,
+                    normalizedValue: i.normalizedValue
+                }))
+            },
+            select: { type: true, normalizedValue: true }
+        });
+
+        const existingSet = new Set(existingIdentifiers.map((e) => `${e.type}:${e.normalizedValue}`));
+
+        const toCreate = identifiers.filter((i) => !existingSet.has(`${i.type}:${i.normalizedValue}`));
+        const toUpdate = identifiers.filter((i) => existingSet.has(`${i.type}:${i.normalizedValue}`));
+
+        if (toCreate.length > 0) {
+            await tx.deviceIdentifier.createMany({
+                data: toCreate.map((i) => ({
+                    identityId: identity.id,
+                    deviceTypeId,
+                    type: i.type,
+                    rawValue: i.rawValue,
+                    normalizedValue: i.normalizedValue
+                }))
+            });
+        }
+
+        for (const i of toUpdate) {
+            await tx.deviceIdentifier.update({
                 where: {
                     deviceTypeId_type_normalizedValue: {
                         deviceTypeId,
@@ -104,16 +133,9 @@ async function upsertIdentityWithIdentifiers({ deviceTypeId, identifiers }) {
                         normalizedValue: i.normalizedValue
                     }
                 },
-                update: {
+                data: {
                     identityId: identity.id,
                     rawValue: i.rawValue
-                },
-                create: {
-                    identityId: identity.id,
-                    deviceTypeId,
-                    type: i.type,
-                    rawValue: i.rawValue,
-                    normalizedValue: i.normalizedValue
                 }
             });
         }

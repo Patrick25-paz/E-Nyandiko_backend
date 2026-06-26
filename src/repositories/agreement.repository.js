@@ -120,6 +120,12 @@ async function listAgreementsAsSeller(sellerId, options = {}) {
                     title: true,
                     deviceType: {
                         select: { id: true, name: true }
+                    },
+                    images: {
+                        orderBy: { sortOrder: 'asc' },
+                        select: {
+                            url: true
+                        }
                     }
                 }
             },
@@ -175,6 +181,12 @@ async function listAgreementsAsBuyer(buyerId, options = {}) {
                     title: true,
                     deviceType: {
                         select: { id: true, name: true }
+                    },
+                    images: {
+                        orderBy: { sortOrder: 'asc' },
+                        select: {
+                            url: true
+                        }
                     }
                 }
             },

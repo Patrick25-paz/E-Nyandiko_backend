@@ -3,8 +3,8 @@ const subscriptionRepository = require('../repositories/subscription.repository'
 const { TtlCache } = require('../utils/ttlCache');
 
 const settingsCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_SETTINGS_TTL_MS || 30_000) });
-const adminSellersCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_SELLERS_TTL_MS || 10_000) });
-const adminClaimsCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_CLAIMS_TTL_MS || 5_000) });
+const adminSellersCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_SELLERS_TTL_MS || 60_000) });
+const adminClaimsCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_CLAIMS_TTL_MS || 30_000) });
 const adminReportCache = new TtlCache({ defaultTtlMs: Number(process.env.CACHE_ADMIN_REPORT_TTL_MS || 30_000) });
 
 function invalidateAdminSubscriptionCaches() {
@@ -74,10 +74,8 @@ async function getMySubscriptionOverview(user) {
         subscriptionRepository.findPendingClaimBySellerId(user.sellerId)
     ]);
 
-    // If latest subscription is marked ACTIVE but already ended, mark it EXPIRED.
-    if (latest && latest.status === 'ACTIVE' && latest.endAt && new Date(latest.endAt) <= now) {
-        await subscriptionRepository.expireSubscription(latest.id);
-    }
+    // Atomically expire any ACTIVE subscriptions that have ended.
+    await subscriptionRepository.expireDueSubscriptions(now);
 
     const activeSubscription = active || null;
 
