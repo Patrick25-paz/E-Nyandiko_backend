@@ -6,6 +6,7 @@ const backendRoot = path.resolve(__dirname, '..');
 const frontendRoot = path.resolve(backendRoot, '..', 'frontend');
 const inputCss = path.join(backendRoot, 'src', 'styles', 'agreement.css');
 const outputCss = path.join(backendRoot, 'dist', 'styles', 'agreement.css');
+const fallbackCss = path.join(backendRoot, 'src', 'styles', 'agreement.compiled.css');
 const frontendDist = path.join(frontendRoot, 'dist');
 
 if (!fs.existsSync(inputCss)) {
@@ -40,12 +41,16 @@ let sourceCss = findLatestCssFile(frontendDist);
 
 if (!sourceCss) {
   if (!fs.existsSync(frontendRoot)) {
-    console.warn(`[Warning] Frontend directory not found at: ${frontendRoot}. Checking for existing compiled CSS...`);
-    if (fs.existsSync(outputCss)) {
+    console.warn(`[Warning] Frontend directory not found at: ${frontendRoot}. Checking for fallback compiled CSS...`);
+    if (fs.existsSync(fallbackCss)) {
+      console.log(`[Success] Found fallback compiled CSS at: ${fallbackCss}. Using it.`);
+      fs.copyFileSync(fallbackCss, outputCss);
+      process.exit(0);
+    } else if (fs.existsSync(outputCss)) {
       console.log(`[Success] Found existing compiled CSS at: ${outputCss}. Using it.`);
       process.exit(0);
     } else {
-      console.warn(`[Warning] No existing CSS found at: ${outputCss}. Creating a fallback from input CSS.`);
+      console.warn(`[Warning] No fallback compiled CSS found at: ${fallbackCss}. Creating a basic stylesheet from input CSS.`);
       fs.copyFileSync(inputCss, outputCss);
       process.exit(0);
     }
