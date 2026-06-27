@@ -15,6 +15,7 @@ async function findDeviceTypeWithFields(deviceTypeId) {
                     label: true,
                     dataType: true,
                     required: true,
+                    isUnique: true,
                     options: true,
                     sortOrder: true
                 }
@@ -245,7 +246,8 @@ async function listDevicesBySeller(sellerId, options = {}) {
                     id: true,
                     status: true,
                     acceptedAt: true,
-                    createdAt: true
+                    createdAt: true,
+                    terms: true
                 }
             },
             exchangeAccess: {

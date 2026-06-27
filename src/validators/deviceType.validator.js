@@ -15,6 +15,7 @@ const createDeviceFieldSchema = z.object({
         label: z.string().min(1),
         dataType: z.enum(['STRING', 'NUMBER', 'BOOLEAN', 'DATE', 'ENUM']),
         required: z.boolean().optional().default(false),
+        isUnique: z.boolean().optional().default(false),
         options: z.array(z.string()).optional(),
         sortOrder: z.number().int().optional().default(0)
     }),
@@ -50,6 +51,7 @@ const updateDeviceFieldSchema = z.object({
         .object({
             label: z.string().min(1).optional(),
             required: z.boolean().optional(),
+            isUnique: z.boolean().optional(),
             options: z.array(z.string()).optional(),
             sortOrder: z.number().int().optional()
         })

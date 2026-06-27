@@ -232,6 +232,7 @@ model DeviceField {
   label        String
   dataType     FieldDataType
   required     Boolean       @default(false)
+  isUnique     Boolean       @default(false)
   // For ENUM fields, store allowed options as a JSON array of strings.
   options      Json?
   sortOrder    Int           @default(0)

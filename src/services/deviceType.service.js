@@ -26,6 +26,7 @@ async function addFieldToDeviceType(deviceTypeId, field) {
             label: field.label,
             dataType: field.dataType,
             required: field.required,
+            isUnique: field.isUnique,
             options: field.options ? field.options : null,
             sortOrder: field.sortOrder
         });
@@ -63,7 +64,7 @@ async function deleteDeviceType(deviceTypeId) {
     return deviceTypeRepository.deactivateDeviceType(deviceTypeId);
 }
 
-async function updateDeviceField(deviceTypeId, fieldId, { label, required, options, sortOrder }) {
+async function updateDeviceField(deviceTypeId, fieldId, { label, required, isUnique, options, sortOrder }) {
     const deviceType = await deviceTypeRepository.findDeviceTypeById(deviceTypeId);
     if (!deviceType) throw new ApiError(404, 'Device type not found');
 
@@ -75,6 +76,7 @@ async function updateDeviceField(deviceTypeId, fieldId, { label, required, optio
     const data = {};
     if (typeof label === 'string') data.label = label;
     if (typeof required === 'boolean') data.required = required;
+    if (typeof isUnique === 'boolean') data.isUnique = isUnique;
     if (typeof sortOrder === 'number') data.sortOrder = sortOrder;
 
     if (existingField.dataType === 'ENUM') {

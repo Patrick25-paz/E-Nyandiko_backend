@@ -1,5 +1,6 @@
 const env = require('../config/env');
 const { ApiError } = require('../utils/errors');
+const { prisma } = require('../config/database');
 const deviceRepository = require('../repositories/device.repository');
 const authRepository = require('../repositories/auth.repository');
 const sellerRepository = require('../repositories/seller.repository');
@@ -128,6 +129,19 @@ async function createDevice({ userId, sellerId, deviceTypeId, title, fieldsRaw, 
     for (const [key, rawValue] of Object.entries(fields)) {
         const field = knownFieldsByKey.get(key);
         const coerced = coerceAndValidateValue(field, rawValue);
+        
+        if (field.isUnique && rawValue !== undefined && rawValue !== null && rawValue !== '') {
+            const duplicate = await prisma.deviceFieldValue.findFirst({
+                where: {
+                    deviceFieldId: field.id,
+                    value: coerced
+                }
+            });
+            if (duplicate) {
+                throw new ApiError(409, `A device with this ${field.label} already exists: "${rawValue}"`);
+            }
+        }
+
         values.push({ deviceFieldId: field.id, value: coerced });
     }
 
@@ -210,6 +224,20 @@ async function updateSellerDevice({ userId, sellerId, deviceId, title, fieldsRaw
     for (const [key, rawValue] of Object.entries(fields)) {
         const field = knownFieldsByKey.get(key);
         const coerced = coerceAndValidateValue(field, rawValue);
+
+        if (field.isUnique && rawValue !== undefined && rawValue !== null && rawValue !== '') {
+            const duplicate = await prisma.deviceFieldValue.findFirst({
+                where: {
+                    deviceFieldId: field.id,
+                    value: coerced,
+                    deviceId: { not: deviceId }
+                }
+            });
+            if (duplicate) {
+                throw new ApiError(409, `A device with this ${field.label} already exists: "${rawValue}"`);
+            }
+        }
+
         values.push({ deviceFieldId: field.id, value: coerced });
     }
 

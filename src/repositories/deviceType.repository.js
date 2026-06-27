@@ -21,6 +21,7 @@ async function updateDeviceType(id, data) {
                     label: true,
                     dataType: true,
                     required: true,
+                    isUnique: true,
                     options: true,
                     sortOrder: true
                 }
@@ -61,6 +62,7 @@ async function findDeviceTypeById(id) {
                     label: true,
                     dataType: true,
                     required: true,
+                    isUnique: true,
                     options: true,
                     sortOrder: true,
                     createdAt: true,
@@ -88,6 +90,7 @@ async function listDeviceTypes() {
                     label: true,
                     dataType: true,
                     required: true,
+                    isUnique: true,
                     options: true,
                     sortOrder: true
                 }
@@ -116,6 +119,7 @@ async function findDeviceFieldById(id) {
             label: true,
             dataType: true,
             required: true,
+            isUnique: true,
             options: true,
             sortOrder: true
         }
@@ -133,6 +137,7 @@ async function updateDeviceField(id, data) {
             label: true,
             dataType: true,
             required: true,
+            isUnique: true,
             options: true,
             sortOrder: true
         }
