@@ -490,10 +490,44 @@ async function renderAgreementPdf(agreement, { puppeteerLaunchOptions = {} } = {
   });
 
   const executablePath = (() => {
+    // If explicit env variables are defined and valid
+    if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+      return process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+    if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
+      return process.env.CHROME_PATH;
+    }
+
+    // Try to find dynamically in standard Linux cache folder
+    const homeDir = process.env.HOME || '/opt/render';
+    const cacheDir = path.join(homeDir, '.cache', 'puppeteer');
+    if (fs.existsSync(cacheDir)) {
+      const findChrome = (dir) => {
+        try {
+          const files = fs.readdirSync(dir);
+          for (const file of files) {
+            const fullPath = path.join(dir, file);
+            const stat = fs.statSync(fullPath);
+            if (stat.isDirectory()) {
+              const found = findChrome(fullPath);
+              if (found) return found;
+            } else if (file === 'chrome' && (stat.mode & 0o111)) {
+              return fullPath;
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return null;
+      };
+      const foundPath = findChrome(cacheDir);
+      if (foundPath) return foundPath;
+    }
+
     const candidates = [
-      process.env.PUPPETEER_EXECUTABLE_PATH,
-      process.env.CHROME_PATH,
-      process.env.EDGE_PATH,
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
       'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
       'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
       'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
